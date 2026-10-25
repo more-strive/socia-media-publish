@@ -1,0 +1,257 @@
+<template>
+  <div class="flex flex-col gap-3">
+    <div class="flex flex-wrap gap-2">
+      <el-select v-model="query.type_" placeholder="类型" clearable class="w-32">
+        <el-option label="视频" value="video" />
+        <el-option label="图文" value="images" />
+        <el-option label="文章" value="article" />
+      </el-select>
+      <el-select v-model="query.status" placeholder="状态" clearable class="w-32">
+        <el-option label="草稿" value="draft" />
+        <el-option label="待审核" value="reviewing" />
+        <el-option label="已通过" value="approved" />
+        <el-option label="已驳回" value="rejected" />
+      </el-select>
+      <el-input v-model="query.keyword" placeholder="搜索标题" clearable class="w-44" @keyup.enter="load" />
+      <el-button type="primary" @click="load">查询</el-button>
+      <div class="flex-1" />
+      <el-upload :show-file-list="false" accept=".docx" multiple :http-request="doImportDocx">
+        <el-button>导入 DOCX</el-button>
+      </el-upload>
+      <el-button @click="openAi">AI 生成文案</el-button>
+      <el-button type="primary" @click="openCreate">新建内容</el-button>
+    </div>
+
+    <el-table :data="rows" class="page-card" v-loading="loading">
+      <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
+      <el-table-column label="类型" width="80">
+        <template #default="{ row }">{{ typeLabels[row.type] }}</template>
+      </el-table-column>
+      <el-table-column label="标签" min-width="140">
+        <template #default="{ row }">
+          <el-tag v-for="t in row.tags || []" :key="t" size="small" class="mr-1">{{ t }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="状态" width="90">
+        <template #default="{ row }">
+          <el-tag :type="statusTagType(row.status)" size="small">{{ STATUS_LABELS[row.status] }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="审核意见" prop="review_note" width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.review_note ?? '-' }}</template>
+      </el-table-column>
+      <el-table-column label="创建时间" width="150">
+        <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="240" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button v-if="['draft', 'rejected'].includes(row.status)" link type="warning" @click="submit(row)">提交审核</el-button>
+          <el-button v-if="row.status === 'reviewing' && auth.canReview" link type="success" @click="review(row, true)">通过</el-button>
+          <el-button v-if="row.status === 'reviewing' && auth.canReview" link type="danger" @click="review(row, false)">驳回</el-button>
+          <el-button link type="primary" @click="router.push({ path: '/publish', query: { content_id: row.id } })">去发布</el-button>
+          <el-button link type="danger" @click="remove(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <el-pagination
+      v-model:current-page="query.page"
+      :page-size="query.page_size"
+      :total="total"
+      layout="total, prev, pager, next"
+      class="justify-end"
+      @current-change="load"
+    />
+
+    <!-- 编辑器 -->
+    <el-dialog v-model="formVisible" :title="form.id ? '编辑内容' : '新建内容'" width="720px" top="5vh">
+      <el-form :model="form" label-width="90px">
+        <el-form-item label="类型">
+          <el-radio-group v-model="form.type" :disabled="!!form.id">
+            <el-radio-button value="video">视频</el-radio-button>
+            <el-radio-button value="images">图文</el-radio-button>
+            <el-radio-button value="article">文章</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="标题">
+          <el-input v-model="form.title" maxlength="255" />
+        </el-form-item>
+        <el-form-item label="摘要">
+          <el-input v-model="form.summary" type="textarea" :rows="2" placeholder="公众号/头条摘要" />
+        </el-form-item>
+        <el-form-item v-if="form.type === 'article'" label="正文">
+          <el-input v-model="form.body" type="textarea" :rows="10" placeholder="支持 HTML / Markdown 文本" />
+        </el-form-item>
+        <el-form-item v-else label="素材链接">
+          <el-input v-model="mediaText" type="textarea" :rows="4" placeholder="每行一个 URL（视频/图片）" />
+        </el-form-item>
+        <el-form-item label="封面链接">
+          <el-input v-model="form.cover" />
+        </el-form-item>
+        <el-form-item label="标签">
+          <el-select v-model="form.tags" multiple filterable allow-create class="w-full" placeholder="输入后回车创建" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="formVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="save">保存草稿</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- AI 生成 -->
+    <el-dialog v-model="aiVisible" title="AI 文案生成" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="主题">
+          <el-input v-model="aiForm.topic" placeholder="如：百元耳机推荐" />
+        </el-form-item>
+        <el-form-item label="平台风格">
+          <el-select v-model="aiForm.platform" class="w-full">
+            <el-option label="小红书" value="xhs" />
+            <el-option label="抖音" value="douyin" />
+            <el-option label="公众号" value="wechat_gzh" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="语气">
+          <el-input v-model="aiForm.tone" placeholder="如：专业、轻松幽默（可选）" />
+        </el-form-item>
+      </el-form>
+      <el-input v-if="aiResult" v-model="aiResult" type="textarea" :rows="8" class="mt-2" />
+      <template #footer>
+        <el-button @click="aiVisible = false">关闭</el-button>
+        <el-button type="primary" plain :loading="aiLoading" @click="doAiGenerate">生成</el-button>
+        <el-button v-if="aiResult" type="primary" @click="saveAiAsDraft">存为草稿</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { contentApi } from '@/api/modules'
+import { useAuthStore } from '@/stores/auth'
+import { fmtTime, statusTagType, STATUS_LABELS } from '@/utils/format'
+import type { Content } from '@/types'
+
+const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
+
+const typeLabels: Record<string, string> = { video: '视频', images: '图文', article: '文章' }
+const loading = ref(false)
+const saving = ref(false)
+const rows = ref<Content[]>([])
+const total = ref(0)
+const query = reactive<Record<string, unknown>>({ page: 1, page_size: 20, type_: '', status: '', keyword: '' })
+
+const formVisible = ref(false)
+const form = reactive<Record<string, unknown>>({ type: 'video', tags: [] })
+const mediaText = ref('')
+
+const aiVisible = ref(false)
+const aiLoading = ref(false)
+const aiResult = ref('')
+const aiForm = reactive({ topic: '', platform: 'xhs', tone: '' })
+
+async function load(): Promise<void> {
+  loading.value = true
+  try {
+    const params = Object.fromEntries(Object.entries(query).filter(([, v]) => v !== '' && v != null))
+    const data = await contentApi.list(params)
+    rows.value = data.items
+    total.value = data.total
+  } finally {
+    loading.value = false
+  }
+}
+
+function openCreate(): void {
+  Object.assign(form, { id: null, type: 'video', title: '', summary: '', body: '', cover: '', tags: [] })
+  mediaText.value = ''
+  formVisible.value = true
+}
+
+function openEdit(row: Content): void {
+  if (!['draft', 'rejected'].includes(row.status)) {
+    ElMessage.warning('仅草稿/驳回状态可编辑')
+    return
+  }
+  Object.assign(form, { ...row })
+  mediaText.value = (row.media || []).join('\n')
+  formVisible.value = true
+}
+
+async function save(): Promise<void> {
+  form.title = (form.title as string)?.trim()
+  if (!form.title) return void ElMessage.warning('请填写标题')
+  form.media = mediaText.value.split('\n').map((s) => s.trim()).filter(Boolean)
+  saving.value = true
+  try {
+    if (form.id) await contentApi.update(form.id as number, form)
+    else await contentApi.create(form)
+    ElMessage.success('已保存')
+    formVisible.value = false
+    await load()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function submit(row: Content): Promise<void> {
+  await contentApi.submit(row.id)
+  ElMessage.success('已提交审核')
+  await load()
+}
+
+async function review(row: Content, approve: boolean): Promise<void> {
+  const note = approve ? '' : await ElMessageBox.prompt('驳回原因', '驳回', { inputPlaceholder: '选填' }).then((r) => r.value).catch(() => null)
+  if (!approve && note === null) return
+  await contentApi.review(row.id, approve, note || undefined)
+  ElMessage.success('审核完成')
+  await load()
+}
+
+async function remove(row: Content): Promise<void> {
+  await ElMessageBox.confirm(`确定删除「${row.title}」？`, '提示', { type: 'warning' })
+  await contentApi.remove(row.id)
+  ElMessage.success('已删除')
+  await load()
+}
+
+async function doImportDocx(option: { file: File }): Promise<void> {
+  const data = await contentApi.importDocx([option.file])
+  ElMessage.success(`成功导入 ${data.imported} 篇：${data.titles.join('、')}`)
+  await load()
+}
+
+function openAi(): void {
+  aiResult.value = ''
+  aiVisible.value = true
+}
+
+async function doAiGenerate(): Promise<void> {
+  if (!aiForm.topic.trim()) return void ElMessage.warning('请填写主题')
+  aiLoading.value = true
+  try {
+    const data = await contentApi.aiGenerate(aiForm.topic, aiForm.platform, aiForm.tone || undefined)
+    aiResult.value = data.content
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function saveAiAsDraft(): Promise<void> {
+  await contentApi.create({ type: 'article', title: aiForm.topic, body: aiResult.value, tags: [] })
+  ElMessage.success('已存为文章草稿')
+  aiVisible.value = false
+  await load()
+}
+
+onMounted(() => {
+  void load()
+  // 从发布页跳转过来直接发布
+  const cid = route.query.content_id
+  if (cid) router.replace({ path: '/publish', query: { content_id: cid } })
+})
+</script>
