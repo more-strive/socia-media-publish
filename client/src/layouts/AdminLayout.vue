@@ -58,6 +58,7 @@ import {
   DataAnalysis,
   MagicStick,
   Monitor,
+  Platform,
   SwitchButton,
   User,
   Document,
@@ -65,12 +66,14 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { messageApi } from '@/api/modules'
+import { useRpaEngine } from '@/composables/useRpaEngine'
 import { useAuthStore } from '@/stores/auth'
 import { ROLE_LABELS } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const rpa = useRpaEngine()
 
 const menus = [
   { path: '/dashboard', label: '工作台', icon: Monitor },
@@ -79,6 +82,7 @@ const menus = [
   { path: '/publish', label: '一键分发', icon: Calendar },
   { path: '/messages', label: '私信评论', icon: ChatDotRound },
   { path: '/stats', label: '数据统计', icon: DataAnalysis },
+  { path: '/browser', label: '账号浏览器', icon: Platform },
   { path: '/ai', label: 'AI 创作', icon: MagicStick },
   { path: '/billing', label: '订阅与账单', icon: Coin },
   { path: '/team', label: '团队管理', icon: Setting },
@@ -111,6 +115,7 @@ async function onCommand(cmd: string): Promise<void> {
 onMounted(() => {
   if (!auth.user) void auth.fetchMe().catch(() => undefined)
   void loadUnread()
+  rpa.start() // RPA 引擎随布局启动（是否执行由开关控制）
 })
 </script>
 

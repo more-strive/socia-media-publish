@@ -250,3 +250,19 @@ export const ROLE_LABELS: Record<string, string> = {
   operator: '运营',
   auditor: '审核员',
 }
+
+/** RPA 认领返回的待执行条目（server /publish/rpa/claim） */
+export interface RpaClaimItem {
+  item_id: number
+  task_id: number
+  account: { id: number; platform: string; nickname: string; note: string | null }
+  content: {
+    id: number
+    type: string
+    title: string
+    summary: string | null
+    media: string[] | null
+    tags: string[] | null
+  }
+  extras: Record<string, unknown> | null
+}

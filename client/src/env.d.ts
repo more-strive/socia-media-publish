@@ -16,5 +16,22 @@ interface Window {
   electronAPI?: {
     platform: string
     versions: { electron: string; chrome: string; node: string }
+    rpa?: {
+      loginDouyin: (accountId: number) => Promise<{ ok: boolean; message: string; nickname?: string }>
+      executeDouyin: (payload: {
+        item_id: number
+        account_id: number
+        title: string
+        media_url: string
+      }) => Promise<{ ok: boolean; message: string; publishUrl?: string }>
+    }
+    tabs?: {
+      open: (opts: { url: string; partition?: string; title?: string }) => Promise<number>
+      activate: (id: number) => Promise<void>
+      close: (id: number) => Promise<void>
+      rect: (rect: { x: number; y: number; width: number; height: number } | null) => Promise<void>
+      state: () => Promise<{ tabs: { id: number; title: string; url: string }[]; activeId: number | null }>
+      onChanged: (cb: (s: { tabs: { id: number; title: string; url: string }[]; activeId: number | null }) => void) => () => void
+    }
   }
 }

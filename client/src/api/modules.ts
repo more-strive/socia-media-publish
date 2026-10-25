@@ -13,6 +13,7 @@ import type {
   Plan,
   ProxyIP,
   PublishTask,
+  RpaClaimItem,
   ReplyRule,
   Script,
   SocialAccount,
@@ -101,6 +102,28 @@ export const publishApi = {
   reviews: (page = 1, page_size = 20) => get<PageData<PublishTask>>('/publish/reviews', { page, page_size }),
   calendar: (start: string, end: string) =>
     get<{ date: string; task_count: number; account_count: number; tasks: PublishTask[] }[]>('/publish/calendar', { start, end }),
+}
+
+// ---- RPA 分发（桌面端认领/回报） ----
+export const rpaApi = {
+  claim: (device_id: string, capacity = 1) => post<RpaClaimItem[]>('/publish/rpa/claim', { device_id, capacity }),
+  report: (body: {
+    item_id: number
+    success: boolean
+    platform_publish_id?: string
+    publish_url?: string
+    fail_reason?: string
+  }) => post<{ item_status: string; task_status: string }>('/publish/rpa/report', body),
+  queue: () =>
+    get<
+      {
+        item_id: number
+        task_id: number
+        platform: string
+        account_nickname: string
+        dispatched_at: string
+      }[]
+    >('/publish/rpa/queue'),
 }
 
 // ---- 私信评论 ----

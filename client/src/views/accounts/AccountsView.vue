@@ -1,4 +1,22 @@
 <template>
+  <!-- RPA 自动发布引擎 -->
+  <el-card shadow="never" class="mb-4">
+    <div class="flex-between">
+      <div>
+        <span class="font-bold">RPA 自动发布引擎</span>
+        <span class="text-muted ml-2 text-12px">抖音等无开放 API 平台由本机浏览器自动执行；先给 RPA 通道账号扫码绑定，再开启引擎；扫码/发布页面在「账号浏览器」标签页中打开</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <el-tag v-if="current" size="small" type="warning">执行中：{{ current.account.nickname }}</el-tag>
+        <span v-if="!canRun" class="text-muted text-12px">仅桌面端可用</span>
+        <el-switch :model-value="enabled" :disabled="!canRun" @change="toggle" />
+      </div>
+    </div>
+    <div v-if="logs.length" class="mt-2 text-12px text-muted max-h-90px overflow-y-auto">
+      <div v-for="(l, i) in logs.slice(0, 8)" :key="i">{{ l }}</div>
+    </div>
+  </el-card>
+
   <el-tabs v-model="tab">
     <!-- 账号列表 -->
     <el-tab-pane label="账号列表" name="accounts">
@@ -45,10 +63,13 @@
         <el-table-column label="最近检测" width="150">
           <template #default="{ row }">{{ fmtTime(row.last_active_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button v-if="row.auth_status !== 'valid'" link type="warning" @click="reAuth(row)">重新授权</el-button>
+            <el-button v-if="row.platform === 'douyin' && row.channel === 'rpa'" link type="success" @click="bind(row)">
+              扫码绑定
+            </el-button>
+            <el-button v-else-if="row.auth_status !== 'valid'" link type="warning" @click="reAuth(row)">重新授权</el-button>
             <el-button link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -103,7 +124,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="账号昵称">
-          <el-input v-model="form.nickname" />
+          <el-input v-model="form.nickname" placeholder="本地标识，抖音扫码成功后自动更新" />
         </el-form-item>
         <el-form-item label="发布通道">
           <el-select v-model="form.channel" class="w-full">
@@ -140,7 +161,9 @@
     </el-form>
     <template #footer>
       <el-button @click="formVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="save">{{ editing ? '保存' : '添加（mock 授权）' }}</el-button>
+      <el-button type="primary" :loading="saving" @click="save">
+        {{ editing ? '保存' : form.platform === 'douyin' && form.channel === 'rpa' ? '添加并扫码绑定' : '添加（mock 授权）' }}
+      </el-button>
     </template>
   </el-dialog>
 
@@ -184,8 +207,12 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { accountApi, proxyApi, userApi } from '@/api/modules'
+import { useRpaEngine } from '@/composables/useRpaEngine'
 import { fmtNum, fmtTime, platformLabel, statusTagType, STATUS_LABELS } from '@/utils/format'
 import { PLATFORM_LABELS, type AccountGroup, type ProxyIP, type SocialAccount, type User } from '@/types'
+
+const rpa = useRpaEngine()
+const { enabled, current, logs, canRun, toggle, bindDouyin } = rpa
 
 const channelLabels: Record<string, string> = { open_api: '开放 API', rpa: 'RPA', cloud_app: '云发布' }
 const tab = ref('accounts')
@@ -239,15 +266,56 @@ function openEdit(row: SocialAccount): void {
 }
 
 async function save(): Promise<void> {
+  if (!editing.value && !String(form.nickname ?? '').trim()) {
+    ElMessage.warning('请填写账号昵称（扫码成功后会自动更新为抖音昵称）')
+    return
+  }
   saving.value = true
   try {
-    if (editing.value) await accountApi.update(editing.value.id, form)
-    else await accountApi.create(form)
-    ElMessage.success('已保存')
-    formVisible.value = false
-    await load()
+    if (editing.value) {
+      await accountApi.update(editing.value.id, form)
+      ElMessage.success('已保存')
+      formVisible.value = false
+      await load()
+    } else {
+      const created = await accountApi.create(form)
+      formVisible.value = false
+      await load()
+      // 抖音 RPA 账号：创建后直接进入扫码绑定，并回填抖音昵称
+      if (created.platform === 'douyin' && created.channel === 'rpa' && canRun.value) {
+        ElMessage.info('账号已创建，正在打开抖音扫码页（账号浏览器标签页）')
+        const res = await bindDouyin(created.id)
+        ElMessage[res.ok ? 'success' : 'warning'](res.message)
+        if (res.ok) {
+          await accountApi.reAuth(created.id).catch(() => undefined)
+          if (res.nickname) {
+            await accountApi.update(created.id, { nickname: res.nickname }).catch(() => undefined)
+            await load()
+          }
+        }
+      } else {
+        ElMessage.success('已保存')
+      }
+    }
   } finally {
     saving.value = false
+  }
+}
+
+/** 已有抖音 RPA 账号重新扫码绑定 */
+async function bind(row: SocialAccount): Promise<void> {
+  if (!canRun.value) {
+    ElMessage.warning('仅桌面端可用')
+    return
+  }
+  const res = await bindDouyin(row.id)
+  ElMessage[res.ok ? 'success' : 'warning'](res.message)
+  if (res.ok) {
+    await accountApi.reAuth(row.id).catch(() => undefined)
+    if (res.nickname && res.nickname !== row.nickname) {
+      await accountApi.update(row.id, { nickname: res.nickname }).catch(() => undefined)
+    }
+    await load()
   }
 }
 

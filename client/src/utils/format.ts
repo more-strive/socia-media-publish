@@ -63,6 +63,7 @@ export const STATUS_LABELS: Record<string, string> = {
   failed: '失败',
   canceled: '已取消',
   pending: '等待中',
+  dispatched: 'RPA 执行中',
   success: '成功',
   valid: '有效',
   expired: '已失效',
