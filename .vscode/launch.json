@@ -1,0 +1,61 @@
+{
+    // 使用说明：
+    // - 「Server: FastAPI (uvicorn)」日常调试用，断点在 app/ 下任意代码生效
+    // - 数据库连接读取 server/.env（远程 social_publish 库），Redis 需本地先起好
+    // - Python 解释器在 VSCode 右下角选择（本机为 D:\python3.12）
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Server: FastAPI (uvicorn)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": ["app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+            "cwd": "${workspaceFolder}/server",
+            "env": {
+                "PYTHONUTF8": "1",
+                "PYTHONUNBUFFERED": "1"
+            },
+            "console": "integratedTerminal",
+            "serverReadyAction": {
+                "pattern": "running on (http\\S+)",
+                "uriFormat": "%s/docs",
+                "action": "openExternally"
+            }
+        },
+        {
+            "name": "Server: init_db（建表演示数据）",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "scripts.init_db",
+            "cwd": "${workspaceFolder}/server",
+            "env": {
+                "PYTHONUTF8": "1"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Server: alembic upgrade head",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "alembic",
+            "args": ["upgrade", "head"],
+            "cwd": "${workspaceFolder}/server",
+            "env": {
+                "PYTHONUTF8": "1"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python: 当前文件",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}/server",
+            "env": {
+                "PYTHONUTF8": "1"
+            },
+            "console": "integratedTerminal"
+        }
+    ]
+}
