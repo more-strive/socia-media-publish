@@ -36,7 +36,7 @@ class Order(TimestampMixin, Base):
     plan_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("plans.id"))
     quantity: Mapped[int] = mapped_column(default=1, comment="数量（月数/席位数/积分数）")
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    status: Mapped[str] = mapped_column(default=OrderStatus.unpaid.value, index=True)
+    status: Mapped[str] = mapped_column(String(16), default=OrderStatus.unpaid.value, index=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     plan: Mapped[Plan | None] = relationship(lazy="joined")

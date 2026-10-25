@@ -34,7 +34,7 @@ class ReplyRule(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     team_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("teams.id"), index=True)
-    rule_type: Mapped[str] = mapped_column(default=ReplyRuleType.keyword.value)
+    rule_type: Mapped[str] = mapped_column(String(16), default=ReplyRuleType.keyword.value)
     keywords: Mapped[list | None] = mapped_column(JSON, comment="触发关键词列表")
     content: Mapped[str] = mapped_column(Text, comment="回复内容")
     status: Mapped[bool] = mapped_column(Boolean, default=True, comment="启用状态")

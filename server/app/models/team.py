@@ -33,8 +33,8 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str | None] = mapped_column(String(128), comment="密码哈希（验证码登录用户可为空）")
     nickname: Mapped[str] = mapped_column(String(64), comment="昵称")
     avatar: Mapped[str | None] = mapped_column(String(512))
-    role: Mapped[str] = mapped_column(default="operator", comment="角色 owner/admin/operator/auditor")
-    status: Mapped[str] = mapped_column(default="active", comment="状态")
+    role: Mapped[str] = mapped_column(String(16), default="operator", comment="角色 owner/admin/operator/auditor")
+    status: Mapped[str] = mapped_column(String(16), default="active", comment="状态")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     team: Mapped[Team] = relationship(lazy="joined")

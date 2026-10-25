@@ -36,7 +36,7 @@ class Content(TimestampMixin, Base):
     media: Mapped[list | None] = mapped_column(JSON, comment="素材 URL 列表")
     cover: Mapped[str | None] = mapped_column(String(512), comment="封面")
     tags: Mapped[list | None] = mapped_column(JSON, comment="标签")
-    status: Mapped[str] = mapped_column(default=ContentStatus.draft.value, comment="draft/reviewing/approved/rejected")
+    status: Mapped[str] = mapped_column(String(16), default=ContentStatus.draft.value, comment="draft/reviewing/approved/rejected")
     review_note: Mapped[str | None] = mapped_column(String(255))
 
 
@@ -49,7 +49,7 @@ class PublishTask(TimestampMixin, Base):
     creator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     mode: Mapped[str] = mapped_column(String(16), default=PublishMode.immediate.value)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, index=True, comment="定时发布时间")
-    status: Mapped[str] = mapped_column(default=PublishTaskStatus.scheduled.value, index=True)
+    status: Mapped[str] = mapped_column(String(16), default=PublishTaskStatus.scheduled.value, index=True)
     reviewer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), comment="审核人")
     review_note: Mapped[str | None] = mapped_column(String(255))
     extras: Mapped[dict | None] = mapped_column(JSON, comment="平台级设置：原创声明/合集/分类等")
@@ -65,7 +65,7 @@ class PublishItem(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("publish_tasks.id"), index=True)
     account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("social_accounts.id"), index=True)
-    status: Mapped[str] = mapped_column(default=PublishItemStatus.pending.value)
+    status: Mapped[str] = mapped_column(String(16), default=PublishItemStatus.pending.value)
     platform_publish_id: Mapped[str | None] = mapped_column(String(128), comment="平台侧作品 ID")
     publish_url: Mapped[str | None] = mapped_column(String(512))
     fail_reason: Mapped[str | None] = mapped_column(String(255))
