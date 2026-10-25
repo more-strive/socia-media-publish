@@ -19,6 +19,25 @@ logger = logging.getLogger("publish.scheduler")
 
 POLL_INTERVAL = 3  # 秒
 LOCK_TTL = 600
+RPA_ITEM_TTL = 1800  # RPA 条目 dispatched 超过该秒数无人回报则回收为 pending
+
+
+def aggregate_task_status(task: PublishTask) -> None:
+    """按 item 状态汇总 task 状态；仍有未完成 item 时保持 publishing"""
+    statuses = [i.status for i in task.items]
+    if any(
+        s in (PublishItemStatus.pending.value, PublishItemStatus.publishing.value, PublishItemStatus.dispatched.value)
+        for s in statuses
+    ):
+        task.status = PublishTaskStatus.publishing.value
+        return
+    success = statuses.count(PublishItemStatus.success.value)
+    failed = len(statuses) - success
+    task.status = (
+        PublishTaskStatus.published.value if failed == 0
+        else PublishTaskStatus.failed.value if success == 0
+        else PublishTaskStatus.partial.value
+    )
 
 
 def _now() -> datetime:
@@ -65,6 +84,9 @@ async def run_task(task_id: int) -> None:
                 item.status = PublishItemStatus.failed.value
                 item.fail_reason = "账号不存在或授权失效" if account is None else "账号授权已失效"
                 continue
+            # RPA 通道按账号 opt-in：server 不执行，条目保持 pending 等桌面端认领（与 mock 开关无关）
+            if account.channel == "rpa":
+                continue
             item.status = PublishItemStatus.publishing.value
             await session.commit()
             try:
@@ -77,16 +99,12 @@ async def run_task(task_id: int) -> None:
             except Exception as e:  # noqa: BLE001 单账号失败不影响其他账号
                 item.status = PublishItemStatus.failed.value
                 item.fail_reason = str(e)[:255]
-        # 汇总任务状态
-        success = sum(1 for i in items if i.status == PublishItemStatus.success.value)
-        failed = len(items) - success
-        task.status = (
-            PublishTaskStatus.published.value if failed == 0
-            else PublishTaskStatus.failed.value if success == 0
-            else PublishTaskStatus.partial.value
-        )
+        # 汇总任务状态（RPA 任务此时可能仍含 dispatched，保持 publishing）
+        aggregate_task_status(task)
         await session.commit()
-        logger.info("发布任务 %s 完成：成功 %s / 失败 %s", task_id, success, failed)
+        success = sum(1 for i in items if i.status == PublishItemStatus.success.value)
+        failed = sum(1 for i in items if i.status == PublishItemStatus.failed.value)
+        logger.info("发布任务 %s 派发完成：成功 %s / 失败 %s / 待客户端 %s", task_id, success, failed, len(items) - success - failed)
 
 
 async def dispatch_due_tasks() -> int:
@@ -141,11 +159,27 @@ async def recover_stale_tasks() -> None:
             logger.info("崩溃恢复：重新入队 %s 个任务", len(tasks))
 
 
+async def recover_stale_rpa_items() -> int:
+    """回收超时未回报的 RPA 条目（客户端崩溃/离线），置回 pending 等待重新认领"""
+    cutoff = _now() - timedelta(seconds=RPA_ITEM_TTL)
+    async with async_session_factory() as session:
+        res = await session.execute(
+            update(PublishItem)
+            .where(PublishItem.status == PublishItemStatus.dispatched.value, PublishItem.updated_at < cutoff)
+            .values(status=PublishItemStatus.pending.value, fail_reason=None)
+        )
+        await session.commit()
+        if res.rowcount:
+            logger.warning("RPA 回收：%s 个超时条目置回 pending", res.rowcount)
+        return res.rowcount or 0
+
+
 async def scheduler_loop() -> None:
     logger.info("发布调度器已启动，轮询间隔 %ss", POLL_INTERVAL)
     while True:
         try:
             await dispatch_due_tasks()
+            await recover_stale_rpa_items()
         except Exception:
             logger.exception("调度轮询异常")
         await asyncio.sleep(POLL_INTERVAL)

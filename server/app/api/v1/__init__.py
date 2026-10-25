@@ -9,6 +9,7 @@ from app.api.v1 import (
     messages,
     publish,
     proxies,
+    rpa,
     stats,
     teams,
     users,
@@ -22,6 +23,7 @@ api_router.include_router(accounts.router)
 api_router.include_router(proxies.router)
 api_router.include_router(contents.router)
 api_router.include_router(publish.router)
+api_router.include_router(rpa.router)
 api_router.include_router(messages.router)
 api_router.include_router(stats.router)
 api_router.include_router(ai.router)

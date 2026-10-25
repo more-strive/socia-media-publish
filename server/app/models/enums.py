@@ -87,6 +87,7 @@ class PublishTaskStatus(StrEnum):
 class PublishItemStatus(StrEnum):
     pending = "pending"
     publishing = "publishing"
+    dispatched = "dispatched"    # RPA：已派发给客户端执行
     success = "success"
     failed = "failed"
 

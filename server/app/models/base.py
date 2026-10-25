@@ -19,6 +19,10 @@ Base.metadata.naming_convention = NAMING_CONVENTION
 
 
 class TimestampMixin:
+    # MySQL 无 INSERT..RETURNING，server_default 列（created_at 等）提交后为未加载状态，
+    # 异步下惰性刷新会抛 MissingGreenlet；eager_defaults 让 flush 时主动 SELECT 回填
+    __mapper_args__ = {"eager_defaults": True}
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间"
