@@ -145,6 +145,23 @@
         <el-table-column label="发布时间" width="150">
           <template #default="{ row }">{{ fmtTime(row.published_at) }}</template>
         </el-table-column>
+        <el-table-column label="截图" width="110">
+          <template #default="{ row }">
+            <div v-if="row.screenshots?.length" class="flex gap-1">
+              <el-image
+                v-for="(s, i) in row.screenshots"
+                :key="i"
+                :src="fileUrl(s)"
+                :preview-src-list="row.screenshots.map(fileUrl)"
+                :initial-index="i"
+                preview-teleported
+                fit="cover"
+                class="w-6 h-6 rounded cursor-pointer"
+              />
+            </div>
+            <span v-else class="text-muted text-12px">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="链接" width="80">
           <template #default="{ row }">
             <el-link v-if="row.publish_url" type="primary" :href="row.publish_url" target="_blank">查看</el-link>
@@ -192,6 +209,11 @@ const accountMap = ref<Record<number, SocialAccount>>({})
 function accountName(id: number): string {
   const a = accountMap.value[id]
   return a ? `${platformLabel(a.platform)} · ${a.nickname}` : `账号#${id}`
+}
+
+/** RPA 归档截图 URL 是 /api 前缀的相对路径，展示时拼当前 origin（开发态走 vite 代理） */
+function fileUrl(u: string): string {
+  return /^https?:/.test(u) ? u : `${location.origin}${u}`
 }
 
 async function loadTasks(): Promise<void> {

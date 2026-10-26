@@ -61,8 +61,26 @@
         <el-table-column label="通道" width="90">
           <template #default="{ row }">{{ channelLabels[row.channel] ?? row.channel }}</template>
         </el-table-column>
+        <el-table-column label="代理" width="120">
+          <template #default="{ row }">
+            <span v-if="proxyNameOf(row)" class="text-12px">{{ proxyNameOf(row) }}</span>
+            <span v-else class="text-muted text-12px">直连</span>
+          </template>
+        </el-table-column>
         <el-table-column label="最近检测" width="150">
-          <template #default="{ row }">{{ fmtTime(row.last_active_at) }}</template>
+          <template #default="{ row }">
+            <div class="flex items-center gap-1">
+              <span>{{ fmtTime(row.last_active_at) }}</span>
+              <el-image
+                v-if="row.last_probe_screenshot"
+                :src="fileUrl(row.last_probe_screenshot)"
+                :preview-src-list="[fileUrl(row.last_probe_screenshot)]"
+                preview-teleported
+                fit="cover"
+                class="w-5 h-5 rounded cursor-pointer"
+              />
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
@@ -154,6 +172,11 @@
           <el-option v-for="m in members" :key="m.id" :label="m.nickname" :value="m.id" />
         </el-select>
       </el-form-item>
+      <el-form-item label="绑定代理">
+        <el-select v-model="form.proxy_id" clearable placeholder="不绑定则直连" class="w-full">
+          <el-option v-for="px in proxies" :key="px.id" :label="px.name + ' · ' + px.host + ':' + px.port" :value="px.id" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="网络区域">
         <el-input v-model="form.region" placeholder="如：广东深圳" />
       </el-form-item>
@@ -212,7 +235,7 @@ import { accountApi, proxyApi, userApi } from '@/api/modules'
 import { usePlatforms } from '@/composables/usePlatforms'
 import { useRpaEngine } from '@/composables/useRpaEngine'
 import { fmtNum, fmtTime, platformLabel, statusTagType, STATUS_LABELS } from '@/utils/format'
-import { PLATFORM_LABELS, type AccountGroup, type ProxyIP, type SocialAccount, type User } from '@/types'
+import { PLATFORM_LABELS, type AccountGroup, type ProxyConfig, type ProxyIP, type SocialAccount, type User } from '@/types'
 
 const rpa = useRpaEngine()
 const { isRpa } = usePlatforms()
@@ -260,13 +283,13 @@ async function loadMeta(): Promise<void> {
 
 function openCreate(): void {
   editing.value = null
-  Object.assign(form, { platform: 'douyin', nickname: '', channel: 'open_api', fans_count: 0, group_id: null, operator_id: null, region: '', note: '' })
+  Object.assign(form, { platform: 'douyin', nickname: '', channel: 'open_api', fans_count: 0, group_id: null, operator_id: null, proxy_id: null, region: '', note: '' })
   formVisible.value = true
 }
 
 function openEdit(row: SocialAccount): void {
   editing.value = row
-  Object.assign(form, { nickname: row.nickname, group_id: row.group_id, operator_id: row.operator_id, region: row.region, note: row.note })
+  Object.assign(form, { nickname: row.nickname, group_id: row.group_id, operator_id: row.operator_id, proxy_id: row.proxy_id, region: row.region, note: row.note })
   formVisible.value = true
 }
 
@@ -289,7 +312,7 @@ async function save(): Promise<void> {
       // RPA 渠道账号：创建后直接进入扫码绑定，并回填平台昵称
       if (isRpa(created.platform) && created.channel === 'rpa' && canRun.value) {
         ElMessage.info('账号已创建，正在打开抖音扫码页（账号浏览器标签页）')
-        const res = await bindPlatform(created.platform, created.id, proxyRulesOf(created))
+        const res = await bindPlatform(created.platform, created.id, proxyOf(created))
         ElMessage[res.ok ? 'success' : 'warning'](res.message)
         if (res.ok) {
           await accountApi.reAuth(created.id).catch(() => undefined)
@@ -307,7 +330,7 @@ async function save(): Promise<void> {
   }
 }
 
-/** RPA 登录态探测：开标签页验证，并把结果回写服务端 auth_status */
+/** RPA 登录态探测：开标签页验证，并把结果与归档截图回写服务端 */
 async function probe(row: SocialAccount): Promise<void> {
   if (!canRun.value) {
     ElMessage.warning('仅桌面端可用')
@@ -315,14 +338,17 @@ async function probe(row: SocialAccount): Promise<void> {
   }
   probing.value = new Set(probing.value).add(row.id)
   try {
-    const res = await probeLogin(row.platform, row.id, proxyRulesOf(row))
+    const res = await probeLogin(row.platform, row.id, proxyOf(row))
     if (!res.ok) {
       ElMessage.warning(res.message)
       return
     }
     ElMessage[res.valid ? 'success' : 'warning'](res.message)
     await accountApi
-      .update(row.id, { auth_status: res.valid ? 'valid' : 'expired' })
+      .update(row.id, {
+        auth_status: res.valid ? 'valid' : 'expired',
+        ...(res.screenshotUrl ? { last_probe_screenshot: res.screenshotUrl } : {}),
+      })
       .catch(() => undefined)
     await load()
   } finally {
@@ -331,10 +357,19 @@ async function probe(row: SocialAccount): Promise<void> {
     probing.value = next
   }
 }
-/** 账号绑定的代理 → Electron proxyRules（ProxyIP 暂无账密字段，认证代理需扩展类型） */
-function proxyRulesOf(row: SocialAccount): string | undefined {
+/** 账号绑定的代理 → 结构化配置（含认证账密；主进程 setProxy + 407 挑战应答） */
+function proxyOf(row: SocialAccount): ProxyConfig | undefined {
   const p = proxies.value.find((x) => x.id === row.proxy_id)
-  return p ? `${p.scheme}://${p.host}:${p.port}` : undefined
+  return p ? { scheme: p.scheme, host: p.host, port: p.port, username: p.username, password: p.password } : undefined
+}
+
+function proxyNameOf(row: SocialAccount): string | undefined {
+  return proxies.value.find((x) => x.id === row.proxy_id)?.name
+}
+
+/** 截图归档 URL 是 /api 前缀的相对路径，展示时拼当前 origin（开发态走 vite 代理） */
+function fileUrl(u: string): string {
+  return /^https?:/.test(u) ? u : `${location.origin}${u}`
 }
 
 /** 批量探测当前页：逐个开页验证 RPA 账号登录态并回写（顺序执行，避免同时开 N 个标签页） */
@@ -353,11 +388,14 @@ async function probeAll(): Promise<void> {
     probing.value = new Set(probing.value).add(row.id)
     try {
       // eslint-disable-next-line no-await-in-loop
-      const res = await probeLogin(row.platform, row.id, proxyRulesOf(row))
+      const res = await probeLogin(row.platform, row.id, proxyOf(row))
       if (res.ok) {
         if (res.valid) valid += 1
         await accountApi
-          .update(row.id, { auth_status: res.valid ? 'valid' : 'expired' })
+          .update(row.id, {
+            auth_status: res.valid ? 'valid' : 'expired',
+            ...(res.screenshotUrl ? { last_probe_screenshot: res.screenshotUrl } : {}),
+          })
           .catch(() => undefined)
       }
     } finally {
@@ -376,7 +414,7 @@ async function bind(row: SocialAccount): Promise<void> {
     ElMessage.warning('仅桌面端可用')
     return
   }
-  const res = await bindPlatform(row.platform, row.id, proxyRulesOf(row))
+  const res = await bindPlatform(row.platform, row.id, proxyOf(row))
   ElMessage[res.ok ? 'success' : 'warning'](res.message)
   if (res.ok) {
     await accountApi.reAuth(row.id).catch(() => undefined)
@@ -421,7 +459,12 @@ async function removeGroup(g: AccountGroup): Promise<void> {
 }
 
 async function loadProxies(): Promise<void> {
-  proxies.value = (await proxyApi.list({ page: 1, page_size: 100 })).items
+  try {
+    proxies.value = (await proxyApi.list({ page: 1, page_size: 100 })).items
+  } catch {
+    // 代理含凭据仅运营角色可见；无权限时账号相关功能退化为直连
+    proxies.value = []
+  }
 }
 
 function openProxy(row?: ProxyIP): void {

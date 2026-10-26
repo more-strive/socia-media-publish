@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import electron from 'electron'
 
 import { closeTab, openTab, tabWebContents } from '../tabs'
+import type { ProxyConfig } from '../proxy'
 
 const { app, session } = electron
 
@@ -32,10 +33,10 @@ async function hasLoginCookie(accountId: number): Promise<boolean> {
 /** 在应用内标签页打开抖音，等待用户扫码；检测到登录 cookie 即成功并关闭标签，尽力带回昵称 */
 export async function loginDouyin(
   accountId: number,
-  proxyRules?: string,
+  proxy?: ProxyConfig,
 ): Promise<{ ok: boolean; message: string; nickname?: string }> {
   if (await hasLoginCookie(accountId)) return { ok: true, message: '已有登录态，无需扫码' }
-  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '抖音扫码登录', proxyRules })
+  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '抖音扫码登录', proxy })
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS
   while (Date.now() < deadline) {
@@ -82,11 +83,13 @@ async function waitFor(
   return false
 }
 
-/** 每个关键步骤截图到 userData/rpa-logs，便于排查选择器失配 */
-async function shot(wc: electron.WebContents, name: string): Promise<void> {
+/** 每个关键步骤截图到 userData/rpa-logs，便于排查选择器失配；路径收集后随结果归档上传 */
+async function shot(wc: electron.WebContents, name: string, into: string[] = []): Promise<void> {
   try {
     const img = await wc.capturePage()
-    await writeFile(join(await logDir(), `${name}.png`), img.toPNG())
+    const path = join(await logDir(), `${name}.png`)
+    await writeFile(path, img.toPNG())
+    into.push(path)
   } catch {
     /* 截图失败不影响流程 */
   }
@@ -97,31 +100,43 @@ export interface DouyinPublishIn {
   itemId: number
   title: string
   videoPath: string
+  /** 账号绑定代理：发布与登录保持同一出口（claim 由 server 下发） */
+  proxy?: ProxyConfig
 }
 
 export interface DouyinPublishOut {
   ok: boolean
   message: string
   publishUrl?: string
+  /** 各步骤截图本地路径（成功/失败均留档，供引擎上传归档） */
+  screenshots: string[]
 }
 
 /** 自动上传发布：标签页打开创作者上传页 → CDP 注入视频文件 → 填标题 → 点发布 → 等跳转
  * 成功自动关标签；失败保留标签供人工检查 */
 export async function publishDouyinVideo(input: DouyinPublishIn): Promise<DouyinPublishOut> {
   const { accountId, itemId, title } = input
-  if (!(await hasLoginCookie(accountId))) return { ok: false, message: '抖音登录态缺失，请先扫码绑定' }
+  if (!(await hasLoginCookie(accountId))) {
+    return { ok: false, message: '抖音登录态缺失，请先扫码绑定', screenshots: [] }
+  }
 
-  const tabId = openTab({ url: UPLOAD_URL, partition: partitionOf(accountId), title: `发布 #${itemId}` })
+  const tabId = openTab({
+    url: UPLOAD_URL,
+    partition: partitionOf(accountId),
+    title: `发布 #${itemId}`,
+    proxy: input.proxy,
+  })
   const wc = tabWebContents(tabId)
-  if (!wc) return { ok: false, message: '标签页创建失败' }
+  if (!wc) return { ok: false, message: '标签页创建失败', screenshots: [] }
 
-  let result: DouyinPublishOut = { ok: false, message: '未知错误' }
+  const shots: string[] = []
+  let result: DouyinPublishOut = { ok: false, message: '未知错误', screenshots: shots }
   try {
     if (!(await waitFor(wc, `document.querySelector('input[type=file]')`, 30_000))) {
-      result = { ok: false, message: '上传页加载超时（未出现文件输入框）' }
+      result = { ok: false, message: '上传页加载超时（未出现文件输入框）', screenshots: shots }
       return result
     }
-    await shot(wc, `item${itemId}_1_loaded`)
+    await shot(wc, `item${itemId}_1_loaded`, shots)
 
     // 渲染层无法给 input[type=file] 赋值，走 CDP DOM.setFileInputFiles
     const dbg = wc.debugger
@@ -133,7 +148,7 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
         selector: 'input[type=file]',
       })
       if (!node.nodeId) {
-        result = { ok: false, message: '上传页未找到文件输入框' }
+        result = { ok: false, message: '上传页未找到文件输入框', screenshots: shots }
         return result
       }
       await dbg.sendCommand('DOM.setFileInputFiles', { files: [input.videoPath], nodeId: node.nodeId })
@@ -147,10 +162,10 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
 
     // 等上传转码完成：标题编辑器出现（大视频可能较久）
     if (!(await waitFor(wc, `document.querySelector('.editor-kit__container, [contenteditable=true], .ql-editor')`, 180_000))) {
-      result = { ok: false, message: '等待上传/编辑器超时' }
+      result = { ok: false, message: '等待上传/编辑器超时', screenshots: shots }
       return result
     }
-    await shot(wc, `item${itemId}_2_uploaded`)
+    await shot(wc, `item${itemId}_2_uploaded`, shots)
 
     // 填标题：抖音标题为 contenteditable，用 execCommand 触发输入事件（React 受控组件兼容）
     const fill = await wc.executeJavaScript(`
@@ -164,7 +179,7 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
         return 'ok'
       })()`)
     if (fill !== 'ok') {
-      result = { ok: false, message: `标题编辑器异常：${fill}` }
+      result = { ok: false, message: `标题编辑器异常：${fill}`, screenshots: shots }
       return result
     }
 
@@ -181,43 +196,44 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
       60_000,
     )
     if (!clicked) {
-      result = { ok: false, message: '未找到可用的发布按钮' }
+      result = { ok: false, message: '未找到可用的发布按钮', screenshots: shots }
       return result
     }
-    await shot(wc, `item${itemId}_3_clicked`)
+    await shot(wc, `item${itemId}_3_clicked`, shots)
 
     // 成功判定：离开上传页
     const done = await waitFor(wc, `!location.pathname.includes('/content/upload')`, 60_000)
-    await shot(wc, `item${itemId}_4_${done ? 'done' : 'timeout'}`)
+    await shot(wc, `item${itemId}_4_${done ? 'done' : 'timeout'}`, shots)
     result = done
-      ? { ok: true, message: '发布成功', publishUrl: wc.getURL() }
-      : { ok: false, message: '点击发布后未跳转，请结合截图/标签页排查（可能有风控弹窗）' }
+      ? { ok: true, message: '发布成功', publishUrl: wc.getURL(), screenshots: shots }
+      : { ok: false, message: '点击发布后未跳转，请结合截图/标签页排查（可能有风控弹窗）', screenshots: shots }
     return result
   } finally {
     if (result.ok) closeTab(tabId)
   }
 }
 
-/** 登录态探测（M4）：cookie 预检 + 开创作者首页验证是否被跳登录页，截图留档到 rpa-logs */
+/** 登录态探测（M4）：cookie 预检 + 开创作者首页验证是否被跳登录页，截图本地留档（路径随结果返回供归档） */
 export async function probeDouyinLogin(
   accountId: number,
-  proxyRules?: string,
-): Promise<{ ok: boolean; valid: boolean; message: string }> {
+  proxy?: ProxyConfig,
+): Promise<{ ok: boolean; valid: boolean; message: string; screenshot?: string }> {
   if (!(await hasLoginCookie(accountId))) {
     return { ok: true, valid: false, message: '无登录 cookie（未绑定或登录态已清理）' }
   }
-  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '检测登录态', proxyRules })
+  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '检测登录态', proxy })
   try {
     await waitFor(tabWebContents(tabId) as electron.WebContents, `document.readyState === 'complete'`, 20_000, 1000)
     const wc = tabWebContents(tabId)
     if (!wc) return { ok: false, valid: false, message: '页面已关闭' }
     await sleep(3000)
     const url = wc.getURL()
-    await shot(wc, `probe-douyin-${accountId}`)
+    const shots: string[] = []
+    await shot(wc, `probe-douyin-${accountId}`, shots)
     const redirected = ['passport.douyin.com', '/login', 'sso.douyin'].some((k) => url.includes(k))
     return redirected
-      ? { ok: true, valid: false, message: '登录态已失效（被跳转到登录页）' }
-      : { ok: true, valid: true, message: '登录态有效' }
+      ? { ok: true, valid: false, message: '登录态已失效（被跳转到登录页）', screenshot: shots[0] }
+      : { ok: true, valid: true, message: '登录态有效', screenshot: shots[0] }
   } finally {
     closeTab(tabId)
   }

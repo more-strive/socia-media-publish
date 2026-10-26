@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     mock_publish: bool = True
     dev_return_sms_code: bool = True
 
+    # 上传（RPA 截图等），经 /api/v1/files 静态暴露
+    upload_dir: str = "uploads"
+
     # AI
     ark_api_key: str = ""
     ark_model: str = "doubao-seed-1-6-250615"

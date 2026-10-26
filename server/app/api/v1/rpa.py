@@ -5,14 +5,17 @@ POST /claim 原子认领（pending→dispatched）→ 本地浏览器自动化�
 超时无人回报的条目由调度器回收为 pending（见 scheduler.recover_stale_rpa_items）。
 """
 from datetime import datetime, timezone
+from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
 from app.api.deps import CurrentUser, DbDep, require_roles
+from app.core.config import settings
 from app.core.exceptions import BizError, NotFoundError
-from app.models.account import SocialAccount
+from app.models.account import ProxyIP, SocialAccount
 from app.models.content import Content, PublishItem, PublishTask
 from app.models.enums import PublishItemStatus, PublishTaskStatus, UserRole
 from app.schemas.common import ok
@@ -36,6 +39,7 @@ class ReportIn(BaseModel):
     platform_publish_id: str | None = Field(default=None, max_length=128)
     publish_url: str | None = Field(default=None, max_length=512)
     fail_reason: str | None = Field(default=None, max_length=255)
+    screenshots: list[str] | None = Field(default=None, description="执行步骤截图 URL（先传 /screenshot 再回报）")
 
 
 def _now() -> datetime:
@@ -62,6 +66,19 @@ async def claim(payload: ClaimIn, user: CurrentUser, db: DbDep):
         )
     ).all()
 
+    # 账号绑定的代理：RPA 发布须与登录/探测同一出口 IP（partition 会话绑代理），claim 一并下发
+    proxy_ids = {a.proxy_id for _, a, _, _ in rows if a.proxy_id}
+    proxies: dict[int, dict] = {}
+    if proxy_ids:
+        for p in (await db.execute(select(ProxyIP).where(ProxyIP.id.in_(proxy_ids)))).scalars():
+            proxies[p.id] = {
+                "scheme": p.scheme,
+                "host": p.host,
+                "port": p.port,
+                "username": p.username,
+                "password": p.password,
+            }
+
     claimed: list[dict] = []
     for item, account, task, content in rows:
         # 原子认领：条件更新防止多客户端抢单
@@ -80,6 +97,7 @@ async def claim(payload: ClaimIn, user: CurrentUser, db: DbDep):
                         "platform": account.platform,
                         "nickname": account.nickname,
                         "note": account.note,
+                        "proxy": proxies.get(account.proxy_id),
                     },
                     "content": {
                         "id": content.id,
@@ -124,11 +142,35 @@ async def report(payload: ReportIn, user: CurrentUser, db: DbDep):
     else:
         item.status = PublishItemStatus.failed.value
         item.fail_reason = (payload.fail_reason or "RPA 执行失败")[:255]
+    if payload.screenshots is not None:
+        item.screenshots = [s[:512] for s in payload.screenshots if s][:8]
     await db.flush()
     await db.refresh(task, attribute_names=["items"])
     aggregate_task_status(task)
     await db.commit()
     return ok({"item_status": item.status, "task_status": task.status})
+
+
+SHOT_MAX_BYTES = 5 * 1024 * 1024
+
+
+@router.post("/screenshot", summary="上传执行截图（发布步骤/登录探测留档）")
+async def upload_screenshot(
+    user: CurrentUser,
+    file: UploadFile = File(description="PNG 截图"),
+    kind: str = Form("publish", pattern=r"^(publish|probe)$"),
+):
+    data = await file.read()
+    if len(data) > SHOT_MAX_BYTES:
+        raise BizError(400, "截图超过 5MB")
+    if not data.startswith(b"\x89PNG"):
+        raise BizError(400, "仅支持 PNG 截图")
+    rel = Path("rpa") / kind / datetime.now().strftime("%Y%m") / f"{uuid4().hex}.png"
+    path = Path(settings.upload_dir) / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    # 挂载在 api 前缀下，客户端 /api 反向代理可直接访问；返回相对路径由前端按需拼 origin
+    return ok({"url": f"{settings.api_v1_prefix}/files/{rel.as_posix()}"})
 
 
 @router.get("/queue", summary="查看派发中的条目（观测用）")

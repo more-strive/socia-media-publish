@@ -36,6 +36,7 @@ class SocialAccount(TimestampMixin, Base):
     channel: Mapped[str] = mapped_column(String(20), default="open_api", comment="发布通道 open_api/rpa/cloud_app")
     region: Mapped[str | None] = mapped_column(String(64), comment="网络区域（IP 归属地）")
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime, comment="最近检测时间")
+    last_probe_screenshot: Mapped[str | None] = mapped_column(String(512), comment="最近登录探测截图 URL")
     note: Mapped[str | None] = mapped_column(String(255))
 
     group: Mapped[AccountGroup | None] = relationship(lazy="joined")

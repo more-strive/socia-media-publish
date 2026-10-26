@@ -1,7 +1,9 @@
 /** 应用内多标签第三方页面：WebContentsView 挂在主窗口，由渲染层 /browser 页上报显示区域 */
 import electron from 'electron'
 
-const { WebContentsView, session } = electron
+import { applySessionProxy, type ProxyConfig } from './proxy'
+
+const { WebContentsView } = electron
 
 export interface TabInfo {
   id: number
@@ -65,7 +67,7 @@ export function resetTabs(): void {
   activeId = null
 }
 
-export function openTab(opts: { url: string; partition?: string; title?: string; proxyRules?: string }): number {
+export function openTab(opts: { url: string; partition?: string; title?: string; proxy?: ProxyConfig }): number {
   const view = new WebContentsView({
     webPreferences: { partition: opts.partition, contextIsolation: true, nodeIntegration: false },
   })
@@ -80,10 +82,8 @@ export function openTab(opts: { url: string; partition?: string; title?: string;
   const load = (): void => {
     void view.webContents.loadURL(opts.url)
   }
-  if (opts.partition && opts.proxyRules) {
-    void session
-      .fromPartition(opts.partition)
-      .setProxy({ mode: 'fixed_servers', proxyRules: opts.proxyRules })
+  if (opts.partition && opts.proxy) {
+    void applySessionProxy(opts.partition, opts.proxy)
       .then(load)
       .catch(load)
   } else {

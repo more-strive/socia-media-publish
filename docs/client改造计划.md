@@ -110,3 +110,22 @@
 - 账号绑定的代理（proxy_id → ProxyIP）在视图侧拼装 scheme://host:port，经 rpa:login / rpa:probe 全链路透传到 openTab（登录即走代理，cookie 留在代理环境里）
 - AccountsView 工具栏新增"批量检测登录态"：顺序探测当前页 RPA 账号并回写 auth_status，逐行 loading，完成提示 N/M 有效
 - 局限：ProxyIP 类型无账密字段，认证代理需后续扩展（类型+server schema）；引擎发布路径的代理接入需服务端 claim 携带代理信息（M4 第三批）
+
+### M4 第三批（2026-10-26）：引擎发布链路走账号代理 + 认证代理
+
+- server `/publish/rpa/claim` 携带账号绑定代理：`account.proxy = {scheme, host, port, username, password}`（proxy_id → ProxyIP 批量解析），引擎 publish 与登录/探测同出口
+- 认证代理支持：`ProxyOut` 下发账密（proxies 路由随之收紧为 owner/admin/operator，与 RPA 派发同门槛）；主进程新增 `electron/proxy.ts`——fixed_servers 规则不支持内嵌账密，凭据登记后经 `app 'login'` 事件应答 407 挑战
+- 代理透传从 `proxyRules: string` 全面改为结构化 `ProxyConfig`（IPC rpa:login/rpa:probe/tabs:open、适配器接口、engine claim、渲染层 types/composable）；`publishDouyinVideo` 的 openTab 补上代理（此前发布走直连）
+- AccountsView 补齐 proxy_id 的 UI 入口：账号弹窗"绑定代理"选择器 + 列表"代理"列（闭环 M4 第二批只差视图绑定的问题）
+- 局限：素材下载（prepareMedia）仍直连（Node fetch 走代理需 undici ProxyAgent，素材来自自家 server，风险低）；AccountUpdateIn 为 exclude_none 语义，清空代理/分组需后续改为 exclude_unset；探测截图上传服务端归档仍待做（需新增上传接口）
+
+### M4 第四批（2026-10-26）：执行截图服务端归档
+
+- server 新增 `POST /publish/rpa/screenshot`（multipart，PNG≤5MB，kind=publish|probe），落盘 `uploads/rpa/<kind>/<yyyymm>/<uuid>.png`，经 `/api/v1/files` 静态暴露（挂在 api 前缀下复用客户端 /api 反向代理；开发态 vite proxy 直通）
+- 发布归档：douyin 每步截图（shot）收集本地路径随结果返回，引擎回报前批量上传（尽力而为，失败不阻断回报），URL 随 `/publish/rpa/report` 写入 `publish_items.screenshots`（≤8 张）；PublishView 任务详情条目表新增"截图"列（缩略图 + 点击预览）
+- 探测归档：`rpa:probe` IPC 增加可选 archive 凭证参数（渲染层注入 localStorage token），主进程上传探测截图并把 URL 随结果返回，AccountsView 回写 `social_accounts.last_probe_screenshot`，"最近检测"列显示缩略图
+- 顺带修复：`update_account` 改 `exclude_unset`（原 exclude_none 导致无法清空代理/分组等可空关联；客户端编辑表单总是显式传全量键，行为兼容）
+- 新增 DB 列（create_all 不会改已有表，存量库需手工执行）：
+  `ALTER TABLE publish_items ADD COLUMN screenshots JSON NULL COMMENT 'RPA 执行步骤截图 URL';`
+  `ALTER TABLE social_accounts ADD COLUMN last_probe_screenshot VARCHAR(512) NULL COMMENT '最近登录探测截图 URL';`
+- 局限：静态文件目录无清理策略（截图随时间累积，后续可加定期清理）；上传接口只校验 PNG 魔数与大小

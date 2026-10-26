@@ -19,6 +19,13 @@ interface EngineEvent {
   ok?: boolean
   message?: string
 }
+interface ElectronProxy {
+  scheme: string
+  host: string
+  port: number
+  username?: string | null
+  password?: string | null
+}
 // 渲染进程可用的桥接：只暴露 invoke 型 IPC，不透传能力
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
@@ -28,16 +35,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     login: (
       platform: string,
       accountId: number,
-      proxyRules?: string,
+      proxy?: ElectronProxy,
     ): Promise<{ ok: boolean; message: string; nickname?: string }> =>
-      ipcRenderer.invoke('rpa:login', platform, accountId, proxyRules),
-    /** 登录态探测（开页验证 + 截图留档，auth_status 回写由调用方负责） */
+      ipcRenderer.invoke('rpa:login', platform, accountId, proxy),
+    /** 登录态探测（开页验证 + 截图归档；auth_status 回写由调用方负责） */
     probe: (
       platform: string,
       accountId: number,
-      proxyRules?: string,
-    ): Promise<{ ok: boolean; valid: boolean; message: string }> =>
-      ipcRenderer.invoke('rpa:probe', platform, accountId, proxyRules),
+      proxy?: ElectronProxy,
+      archive?: { baseUrl: string; token: string },
+    ): Promise<{ ok: boolean; valid: boolean; message: string; screenshotUrl?: string }> =>
+      ipcRenderer.invoke('rpa:probe', platform, accountId, proxy, archive),
   },
   platforms: {
     /** 已接入 RPA 的平台代码列表（视图据此判断平台能力） */
@@ -58,7 +66,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
   tabs: {
-    open: (opts: { url: string; partition?: string; title?: string }): Promise<number> =>
+    open: (opts: { url: string; partition?: string; title?: string; proxy?: ElectronProxy }): Promise<number> =>
       ipcRenderer.invoke('tabs:open', opts),
     activate: (id: number): Promise<void> => ipcRenderer.invoke('tabs:activate', id),
     close: (id: number): Promise<void> => ipcRenderer.invoke('tabs:close', id),

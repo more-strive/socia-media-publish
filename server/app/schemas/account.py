@@ -39,6 +39,7 @@ class AccountUpdateIn(BaseModel):
     region: str | None = None
     note: str | None = None
     nickname: str | None = Field(default=None, min_length=1, max_length=128)
+    last_probe_screenshot: str | None = Field(default=None, max_length=512)
 
 
 class AccountOut(BaseModel):
@@ -56,6 +57,7 @@ class AccountOut(BaseModel):
     channel: str
     region: str | None = None
     last_active_at: datetime | None = None
+    last_probe_screenshot: str | None = None
     note: str | None = None
 
     model_config = {"from_attributes": True}
@@ -82,6 +84,9 @@ class ProxyOut(BaseModel):
     scheme: str
     host: str
     port: int
+    # 认证代理凭据需下发到桌面端应答 407 挑战（仅团队角色可见，HTTPS 传输）
+    username: str | None = None
+    password: str | None = None
     region: str | None = None
     status: str
     last_check_at: datetime | None = None

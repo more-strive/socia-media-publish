@@ -67,6 +67,7 @@ class PublishItemOut(BaseModel):
     publish_url: str | None = None
     fail_reason: str | None = None
     published_at: datetime | None = None
+    screenshots: list[str] | None = None
 
     model_config = {"from_attributes": True}
 

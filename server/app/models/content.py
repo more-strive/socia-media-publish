@@ -70,5 +70,6 @@ class PublishItem(TimestampMixin, Base):
     publish_url: Mapped[str | None] = mapped_column(String(512))
     fail_reason: Mapped[str | None] = mapped_column(String(255))
     published_at: Mapped[datetime | None] = mapped_column(DateTime)
+    screenshots: Mapped[list | None] = mapped_column(JSON, comment="RPA 执行步骤截图 URL")
 
     task: Mapped[PublishTask] = relationship(back_populates="items")

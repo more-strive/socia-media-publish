@@ -3,7 +3,9 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import electron from 'electron'
 import { initEngine } from './engine'
+import { initProxyAuth, type ProxyConfig } from './proxy'
 import { adapterOf, rpaPlatforms } from './rpa/platforms'
+import { uploadScreenshot, type ServerCreds } from './upload'
 import { activateTab, closeTab, initTabs, openTab, resetTabs, setTabBounds, tabsState } from './tabs'
 // ESM 下 electron 模块需默认导入再解构；无 __dirname，用 import.meta 推导
 const { app, BrowserWindow, ipcMain, shell } = electron
@@ -61,19 +63,31 @@ app.on('window-all-closed', () => {
 })
 // ---- RPA IPC（平台能力经适配器注册表分发，视图层不感知具体平台）----
 ipcMain.handle('platforms:list', () => rpaPlatforms())
-ipcMain.handle('rpa:login', (_e, platform: string, accountId: number, proxyRules?: string) => {
+ipcMain.handle('rpa:login', (_e, platform: string, accountId: number, proxy?: ProxyConfig) => {
   const adapter = adapterOf(platform)
   if (!adapter) return { ok: false, message: '平台 ' + platform + ' 暂不支持 RPA 绑定' }
-  return adapter.login(accountId, proxyRules)
+  return adapter.login(accountId, proxy)
 })
-ipcMain.handle('rpa:probe', (_e, platform: string, accountId: number, proxyRules?: string) => {
+ipcMain.handle('rpa:probe', async (_e, platform: string, accountId: number, proxy?: ProxyConfig, archive?: ServerCreds) => {
   const adapter = adapterOf(platform)
   if (!adapter?.probe) return { ok: false, valid: false, message: '平台 ' + platform + ' 暂不支持登录探测' }
-  return adapter.probe(accountId, proxyRules)
+  const res = await adapter.probe(accountId, proxy)
+  // 探测截图归档：调用方注入凭证（渲染层 localStorage 的 token），失败不影响探测结果
+  if (res.screenshot && archive) {
+    try {
+      res.screenshotUrl = await uploadScreenshot(archive, res.screenshot, 'probe')
+    } catch {
+      /* 留档失败忽略 */
+    }
+  }
+  return res
 })
 
 // ---- 应用内标签页 ----
-ipcMain.handle('tabs:open', (_e, opts: { url: string; partition?: string; title?: string }) => openTab(opts))
+ipcMain.handle(
+  'tabs:open',
+  (_e, opts: { url: string; partition?: string; title?: string; proxy?: ProxyConfig }) => openTab(opts),
+)
 ipcMain.handle('tabs:activate', (_e, id: number) => activateTab(id))
 ipcMain.handle('tabs:close', (_e, id: number) => closeTab(id))
 ipcMain.handle('tabs:rect', (_e, rect: { x: number; y: number; width: number; height: number } | null) => {
@@ -82,6 +96,8 @@ ipcMain.handle('tabs:rect', (_e, rect: { x: number; y: number; width: number; he
 ipcMain.handle('tabs:state', () => tabsState())
 // ---- RPA 引擎（主进程常驻认领-执行-回报，见 docs/client改造计划.md M0）----
 initEngine()
+// 认证代理 407 挑战应答（凭据登记见 electron/proxy.ts）
+initProxyAuth()
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })

@@ -17,13 +17,14 @@ electronAPI?: {
     login: (
       platform: string,
       accountId: number,
-      proxyRules?: string,
+      proxy?: { scheme: string; host: string; port: number; username?: string | null; password?: string | null },
     ) => Promise<{ ok: boolean; message: string; nickname?: string }>
     probe: (
       platform: string,
       accountId: number,
-      proxyRules?: string,
-    ) => Promise<{ ok: boolean; valid: boolean; message: string }>
+      proxy?: { scheme: string; host: string; port: number; username?: string | null; password?: string | null },
+      archive?: { baseUrl: string; token: string },
+    ) => Promise<{ ok: boolean; valid: boolean; message: string; screenshotUrl?: string }>
   }
   platforms?: {
     list: () => Promise<string[]>
@@ -43,7 +44,12 @@ electronAPI?: {
     onEvent: (cb: (ev: { type: string } & Record<string, unknown>) => void) => () => void
   }
   tabs?: {
-    open: (opts: { url: string; partition?: string; title?: string }) => Promise<number>
+    open: (opts: {
+      url: string
+      partition?: string
+      title?: string
+      proxy?: { scheme: string; host: string; port: number; username?: string | null; password?: string | null }
+    }) => Promise<number>
     activate: (id: number) => Promise<void>
     close: (id: number) => Promise<void>
     rect: (rect: { x: number; y: number; width: number; height: number } | null) => Promise<void>

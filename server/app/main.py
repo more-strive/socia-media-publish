@@ -5,9 +5,11 @@
 """
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.api.v1 import api_router
@@ -62,6 +64,11 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+    # 上传文件静态暴露（挂在 api 前缀下，复用客户端 /api 反向代理与鉴权网络路径）
+    upload_root = Path(settings.upload_dir)
+    upload_root.mkdir(parents=True, exist_ok=True)
+    app.mount(f"{settings.api_v1_prefix}/files", StaticFiles(directory=str(upload_root)), name="files")
 
     @app.get("/health", tags=["系统"])
     async def health():

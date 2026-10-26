@@ -58,7 +58,17 @@ export interface SocialAccount {
   channel: string
   region: string | null
   last_active_at: string | null
+  last_probe_screenshot: string | null
   note: string | null
+}
+
+/** 传给主进程的代理配置（结构化；认证代理账密由主进程应答 407 挑战） */
+export interface ProxyConfig {
+  scheme: string
+  host: string
+  port: number
+  username?: string | null
+  password?: string | null
 }
 
 export interface ProxyIP {
@@ -67,6 +77,8 @@ export interface ProxyIP {
   scheme: string
   host: string
   port: number
+  username: string | null
+  password: string | null
   region: string | null
   status: 'unknown' | 'ok' | 'broken'
   last_check_at: string | null
@@ -95,6 +107,7 @@ export interface PublishItem {
   publish_url: string | null
   fail_reason: string | null
   published_at: string | null
+  screenshots: string[] | null
 }
 
 export interface PublishTask {
@@ -255,7 +268,13 @@ export const ROLE_LABELS: Record<string, string> = {
 export interface RpaClaimItem {
   item_id: number
   task_id: number
-  account: { id: number; platform: string; nickname: string; note: string | null }
+  account: {
+    id: number
+    platform: string
+    nickname: string
+    note: string | null
+    proxy?: ProxyConfig | null
+  }
   content: {
     id: number
     type: string

@@ -5,14 +5,19 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 from sqlalchemy import func, select
 
-from app.api.deps import CurrentUser, DbDep, PageDep
+from app.api.deps import CurrentUser, DbDep, PageDep, require_roles
 from app.core.exceptions import NotFoundError
 from app.models.account import ProxyIP
-from app.models.enums import ProxyStatus
+from app.models.enums import ProxyStatus, UserRole
 from app.schemas.account import ProxyIn, ProxyOut
 from app.schemas.common import ok
 
-router = APIRouter(prefix="/proxies", tags=["代理IP"])
+# 代理含认证凭据，与 RPA 派发通道同门槛
+router = APIRouter(
+    prefix="/proxies",
+    tags=["代理IP"],
+    dependencies=[require_roles(UserRole.owner, UserRole.admin, UserRole.operator)],
+)
 
 
 async def _check_tcp(host: str, port: int, timeout: float = 5.0) -> bool:

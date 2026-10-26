@@ -8,7 +8,9 @@ import { Readable } from 'node:stream'
 import type { ReadableStream as NodeWebReadableStream } from 'node:stream/web'
 import { pipeline } from 'node:stream/promises'
 import electron from 'electron'
+import type { ProxyConfig } from './proxy'
 import { adapterOf } from './rpa/platforms'
+import { uploadScreenshot } from './upload'
 
 const { app, ipcMain, BrowserWindow } = electron
 
@@ -18,7 +20,14 @@ const POLL_MS = 5000
 export interface EngineClaim {
   item_id: number
   task_id: number
-  account: { id: number; platform: string; nickname: string; note: string | null }
+  account: {
+    id: number
+    platform: string
+    nickname: string
+    note: string | null
+    /** 账号绑定代理（server 由 proxy_id 解析下发），发布与登录保持同一出口 */
+    proxy: ProxyConfig | null
+  }
   content: {
     id: number
     type: string
@@ -122,8 +131,24 @@ async function report(payload: {
   success: boolean
   publish_url?: string
   fail_reason?: string
+  screenshots?: string[]
 }): Promise<void> {
   await api('/publish/rpa/report', payload)
+}
+
+/** 截图归档：尽力而为，失败仅记日志（不影响回报主流程） */
+async function archiveShots(item: EngineClaim, paths: string[]): Promise<string[]> {
+  if (!paths.length || !creds) return []
+  const urls: string[] = []
+  for (const p of paths) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      urls.push(await uploadScreenshot(creds, p, 'publish', item.item_id))
+    } catch {
+      /* 归档失败不阻断回报 */
+    }
+  }
+  return urls
 }
 
 /** 素材准备：http(s) 流式下载到临时文件（不整包进内存）；本地路径直接使用 */
@@ -153,12 +178,15 @@ async function executeOne(item: EngineClaim): Promise<void> {
       accountId: item.account.id,
       title: item.content.title,
       mediaPath,
+      proxy: item.account.proxy ?? undefined,
     })
+    const shots = await archiveShots(item, out.screenshots ?? [])
     await report({
       item_id: item.item_id,
       success: out.ok,
       publish_url: out.publishUrl,
       fail_reason: out.ok ? undefined : out.message,
+      screenshots: shots,
     })
     log(`${tag}：${out.ok ? '发布成功' : `失败 - ${out.message}`}`)
     broadcast({ type: 'done', item, ok: out.ok, message: out.message })

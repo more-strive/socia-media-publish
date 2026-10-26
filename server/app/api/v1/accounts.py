@@ -143,7 +143,8 @@ async def update_account(account_id: int, payload: AccountUpdateIn, user: Curren
     )
     if account is None:
         raise NotFoundError("账号不存在")
-    for k, v in payload.model_dump(exclude_none=True).items():
+    # exclude_unset：仅覆盖客户端显式传入的字段（传 null 即清空代理/分组等可空关联）
+    for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(account, k, v)
     await db.commit()
     return ok(_out(account))

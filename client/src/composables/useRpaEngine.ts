@@ -2,7 +2,7 @@
  *  对外 API 与旧版渲染层轮询实现保持一致，AdminLayout/AccountsView 无感切换 */
 import { computed, ref } from 'vue'
 import router from '@/router'
-import type { RpaClaimItem } from '@/types'
+import type { ProxyConfig, RpaClaimItem } from '@/types'
 
 const enabled = ref(false)
 const busy = ref(false)
@@ -77,21 +77,22 @@ async function toggle(v: boolean | string | number): Promise<void> {
 function bindPlatform(
   platform: string,
   accountId: number,
-  proxyRules?: string,
+  proxy?: ProxyConfig,
 ): Promise<{ ok: boolean; message: string; nickname?: string }> {
   if (!window.electronAPI?.rpa?.login) return Promise.resolve({ ok: false, message: '仅桌面端可用' })
   void router.push('/browser')
-  return window.electronAPI.rpa.login(platform, accountId, proxyRules)
+  return window.electronAPI.rpa.login(platform, accountId, proxy)
 }
 
-/** 登录态探测（可选能力）：结果回写由调用方负责 */
+/** 登录态探测（可选能力）：结果回写由调用方负责；携带凭证让主进程把探测截图归档到服务端 */
 function probeLogin(
   platform: string,
   accountId: number,
-  proxyRules?: string,
-): Promise<{ ok: boolean; valid: boolean; message: string }> {
+  proxy?: ProxyConfig,
+): Promise<{ ok: boolean; valid: boolean; message: string; screenshotUrl?: string }> {
   if (!window.electronAPI?.rpa?.probe) return Promise.resolve({ ok: false, valid: false, message: '仅桌面端可用' })
-  return window.electronAPI.rpa.probe(platform, accountId, proxyRules)
+  const token = localStorage.getItem('token') ?? ''
+  return window.electronAPI.rpa.probe(platform, accountId, proxy, token ? { baseUrl: engineBaseUrl(), token } : undefined)
 }
 export function useRpaEngine() {
   return { enabled, busy, current, logs, canRun, running, start, toggle, bindPlatform, probeLogin }
