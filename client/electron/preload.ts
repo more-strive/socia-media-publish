@@ -1,11 +1,5 @@
 import electron from 'electron'
 const { contextBridge, ipcRenderer } = electron
-interface DouyinExecPayload {
-  item_id: number
-  account_id: number
-  title: string
-  media_url: string
-}
 interface TabsState {
   tabs: { id: number; title: string; url: string }[]
   activeId: number | null
@@ -30,12 +24,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   versions: { electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node },
   rpa: {
-    /** 打开抖音扫码登录窗口（每账号独立 session），成功返回 { ok, message } */
-    loginDouyin: (accountId: number): Promise<{ ok: boolean; message: string }> =>
-      ipcRenderer.invoke('rpa:login-douyin', accountId),
-    /** 执行一条抖音发布任务（主进程下载素材 + 浏览器自动化） */
-    executeDouyin: (payload: DouyinExecPayload): Promise<{ ok: boolean; message: string; publishUrl?: string }> =>
-      ipcRenderer.invoke('rpa:execute-douyin', payload),
+    /** 按平台打开扫码/登录标签页（主进程适配器注册表分发） */
+    login: (platform: string, accountId: number): Promise<{ ok: boolean; message: string; nickname?: string }> =>
+      ipcRenderer.invoke('rpa:login', platform, accountId),
+  },
+  platforms: {
+    /** 已接入 RPA 的平台代码列表（视图据此判断平台能力） */
+    list: (): Promise<string[]> => ipcRenderer.invoke('platforms:list'),
   },
   engine: {
     /** 注入凭证并启动主进程执行引擎（认领-执行-回报循环） */

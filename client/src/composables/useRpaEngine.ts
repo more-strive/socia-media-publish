@@ -73,13 +73,13 @@ async function toggle(v: boolean | string | number): Promise<void> {
   await window.electronAPI?.engine?.setEnabled(!!v)
 }
 
-/** 打开扫码登录标签页，返回结果由调用方提示 */
-function bindDouyin(accountId: number): Promise<{ ok: boolean; message: string; nickname?: string }> {
-  if (!window.electronAPI?.rpa) return Promise.resolve({ ok: false, message: '仅桌面端可用' })
+/** 按平台打开扫码登录标签页（主进程适配器分发），返回结果由调用方提示 */
+function bindPlatform(platform: string, accountId: number): Promise<{ ok: boolean; message: string; nickname?: string }> {
+  if (!window.electronAPI?.rpa?.login) return Promise.resolve({ ok: false, message: '仅桌面端可用' })
   void router.push('/browser')
-  return window.electronAPI.rpa.loginDouyin(accountId)
+  return window.electronAPI.rpa.login(platform, accountId)
 }
 
 export function useRpaEngine() {
-  return { enabled, busy, current, logs, canRun, running, start, toggle, bindDouyin }
+  return { enabled, busy, current, logs, canRun, running, start, toggle, bindPlatform }
 }

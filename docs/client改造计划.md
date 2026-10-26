@@ -90,3 +90,9 @@
 - 工作台改版：新增本机 RPA 引擎状态条（运行状态 + 当前任务 + 开关，仅桌面端显示）、汇总卡片补 托管账号(含失效数)/待审核/今日发布
 - 侧边栏分组结构已与 web 版 IA 对齐（分发/账号/互动/数据/创作/管理）
 - 后续可选：operation-log 操作日志、system-notifications 系统通知（服务端需新增对应表与接口）
+
+### M2 完成（2026-10-26）
+
+- IPC 改为平台无关：`platforms:list`（注册表清单）+ `rpa:login(platform, accountId)`（适配器分发），删除 `rpa:login-douyin` / `rpa:execute-douyin`（后者渲染层已无调用方，属 M0 引擎化后的死代码）
+- 渲染层新增 `usePlatforms()` composable；AccountsView 4 处 `platform === 'douyin'` 硬编码全部改 `isRpa(platform)` 能力查询
+- 新平台接入从"改 N 个视图"收敛为"实现 PlatformAdapter + 注册"两步

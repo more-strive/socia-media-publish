@@ -14,13 +14,10 @@ electronAPI?: {
   platform: string
   versions: { electron: string; chrome: string; node: string }
   rpa?: {
-    loginDouyin: (accountId: number) => Promise<{ ok: boolean; message: string; nickname?: string }>
-    executeDouyin: (payload: {
-      item_id: number
-      account_id: number
-      title: string
-      media_url: string
-    }) => Promise<{ ok: boolean; message: string; publishUrl?: string }>
+    login: (platform: string, accountId: number) => Promise<{ ok: boolean; message: string; nickname?: string }>
+  }
+  platforms?: {
+    list: () => Promise<string[]>
   }
   engine?: {
     start: (opts: { baseUrl: string; token: string }) => Promise<void>

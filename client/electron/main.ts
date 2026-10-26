@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import electron from 'electron'
-import { initEngine, prepareMedia } from './engine'
-import { loginDouyin, publishDouyinVideo } from './rpa/douyin'
+import { initEngine } from './engine'
+import { adapterOf, rpaPlatforms } from './rpa/platforms'
 import { activateTab, closeTab, initTabs, openTab, resetTabs, setTabBounds, tabsState } from './tabs'
 // ESM 下 electron 模块需默认导入再解构；无 __dirname，用 import.meta 推导
 const { app, BrowserWindow, ipcMain, shell } = electron
@@ -59,25 +59,14 @@ function createWindow(): void {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
-// ---- RPA IPC ----
-ipcMain.handle('rpa:login-douyin', (_e, accountId: number) => loginDouyin(accountId))
-ipcMain.handle(
-  'rpa:execute-douyin',
-  async (_e, p: { item_id: number; account_id: number; title: string; media_url: string }) => {
-    try {
-      // 素材就位（流式下载）后执行平台流程；与引擎认领执行同源，避免两份下载逻辑
-      const mediaPath = await prepareMedia(p.media_url)
-      return await publishDouyinVideo({
-        accountId: p.account_id,
-        itemId: p.item_id,
-        title: p.title,
-        videoPath: mediaPath,
-      })
-    } catch (err) {
-      return { ok: false, message: String(err) }
-    }
-  },
-)
+// ---- RPA IPC（平台能力经适配器注册表分发，视图层不感知具体平台）----
+ipcMain.handle('platforms:list', () => rpaPlatforms())
+ipcMain.handle('rpa:login', (_e, platform: string, accountId: number) => {
+  const adapter = adapterOf(platform)
+  if (!adapter) return { ok: false, message: '平台 ' + platform + ' 暂不支持 RPA 绑定' }
+  return adapter.login(accountId)
+})
+
 // ---- 应用内标签页 ----
 ipcMain.handle('tabs:open', (_e, opts: { url: string; partition?: string; title?: string }) => openTab(opts))
 ipcMain.handle('tabs:activate', (_e, id: number) => activateTab(id))

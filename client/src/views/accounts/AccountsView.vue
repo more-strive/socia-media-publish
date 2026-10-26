@@ -66,7 +66,7 @@
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button v-if="row.platform === 'douyin' && row.channel === 'rpa'" link type="success" @click="bind(row)">
+            <el-button v-if="isRpa(row.platform) && row.channel === 'rpa'" link type="success" @click="bind(row)">
               扫码绑定
             </el-button>
             <el-button v-else-if="row.auth_status !== 'valid'" link type="warning" @click="reAuth(row)">重新授权</el-button>
@@ -162,7 +162,7 @@
     <template #footer>
       <el-button @click="formVisible = false">取消</el-button>
       <el-button type="primary" :loading="saving" @click="save">
-        {{ editing ? '保存' : form.platform === 'douyin' && form.channel === 'rpa' ? '添加并扫码绑定' : '添加（mock 授权）' }}
+        {{ editing ? '保存' : isRpa(form.platform) && form.channel === 'rpa' ? '添加并扫码绑定' : '添加（mock 授权）' }}
       </el-button>
     </template>
   </el-dialog>
@@ -207,12 +207,14 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { accountApi, proxyApi, userApi } from '@/api/modules'
+import { usePlatforms } from '@/composables/usePlatforms'
 import { useRpaEngine } from '@/composables/useRpaEngine'
 import { fmtNum, fmtTime, platformLabel, statusTagType, STATUS_LABELS } from '@/utils/format'
 import { PLATFORM_LABELS, type AccountGroup, type ProxyIP, type SocialAccount, type User } from '@/types'
 
 const rpa = useRpaEngine()
-const { enabled, current, logs, canRun, toggle, bindDouyin } = rpa
+const { isRpa } = usePlatforms()
+const { enabled, current, logs, canRun, toggle, bindPlatform } = rpa
 
 const channelLabels: Record<string, string> = { open_api: '开放 API', rpa: 'RPA', cloud_app: '云发布' }
 const tab = ref('accounts')
@@ -267,7 +269,7 @@ function openEdit(row: SocialAccount): void {
 
 async function save(): Promise<void> {
   if (!editing.value && !String(form.nickname ?? '').trim()) {
-    ElMessage.warning('请填写账号昵称（扫码成功后会自动更新为抖音昵称）')
+    ElMessage.warning('请填写账号昵称（扫码成功后会自动更新为平台昵称）')
     return
   }
   saving.value = true
@@ -281,10 +283,10 @@ async function save(): Promise<void> {
       const created = await accountApi.create(form)
       formVisible.value = false
       await load()
-      // 抖音 RPA 账号：创建后直接进入扫码绑定，并回填抖音昵称
-      if (created.platform === 'douyin' && created.channel === 'rpa' && canRun.value) {
+      // RPA 渠道账号：创建后直接进入扫码绑定，并回填平台昵称
+      if (isRpa(created.platform) && created.channel === 'rpa' && canRun.value) {
         ElMessage.info('账号已创建，正在打开抖音扫码页（账号浏览器标签页）')
-        const res = await bindDouyin(created.id)
+        const res = await bindPlatform(created.platform, created.id)
         ElMessage[res.ok ? 'success' : 'warning'](res.message)
         if (res.ok) {
           await accountApi.reAuth(created.id).catch(() => undefined)
@@ -302,13 +304,13 @@ async function save(): Promise<void> {
   }
 }
 
-/** 已有抖音 RPA 账号重新扫码绑定 */
+/** 已有 RPA 账号重新扫码绑定 */
 async function bind(row: SocialAccount): Promise<void> {
   if (!canRun.value) {
     ElMessage.warning('仅桌面端可用')
     return
   }
-  const res = await bindDouyin(row.id)
+  const res = await bindPlatform(row.platform, row.id)
   ElMessage[res.ok ? 'success' : 'warning'](res.message)
   if (res.ok) {
     await accountApi.reAuth(row.id).catch(() => undefined)
