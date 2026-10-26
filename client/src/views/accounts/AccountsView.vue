@@ -34,6 +34,7 @@
         <el-input v-model="query.keyword" placeholder="搜索昵称" clearable class="w-44" @keyup.enter="load" />
         <el-button type="primary" @click="load">查询</el-button>
         <el-button @click="batchCheck">批量检测有效性</el-button>
+<el-button @click="probeAll">批量检测登录态</el-button>
         <div class="flex-1" />
         <el-button @click="groupDialogVisible = true">分组管理</el-button>
         <el-button type="primary" @click="openCreate">添加账号</el-button>
@@ -288,7 +289,7 @@ async function save(): Promise<void> {
       // RPA 渠道账号：创建后直接进入扫码绑定，并回填平台昵称
       if (isRpa(created.platform) && created.channel === 'rpa' && canRun.value) {
         ElMessage.info('账号已创建，正在打开抖音扫码页（账号浏览器标签页）')
-        const res = await bindPlatform(created.platform, created.id)
+        const res = await bindPlatform(created.platform, created.id, proxyRulesOf(created))
         ElMessage[res.ok ? 'success' : 'warning'](res.message)
         if (res.ok) {
           await accountApi.reAuth(created.id).catch(() => undefined)
@@ -314,7 +315,7 @@ async function probe(row: SocialAccount): Promise<void> {
   }
   probing.value = new Set(probing.value).add(row.id)
   try {
-    const res = await probeLogin(row.platform, row.id)
+    const res = await probeLogin(row.platform, row.id, proxyRulesOf(row))
     if (!res.ok) {
       ElMessage.warning(res.message)
       return
@@ -330,13 +331,52 @@ async function probe(row: SocialAccount): Promise<void> {
     probing.value = next
   }
 }
+/** 账号绑定的代理 → Electron proxyRules（ProxyIP 暂无账密字段，认证代理需扩展类型） */
+function proxyRulesOf(row: SocialAccount): string | undefined {
+  const p = proxies.value.find((x) => x.id === row.proxy_id)
+  return p ? `${p.scheme}://${p.host}:${p.port}` : undefined
+}
+
+/** 批量探测当前页：逐个开页验证 RPA 账号登录态并回写（顺序执行，避免同时开 N 个标签页） */
+async function probeAll(): Promise<void> {
+  if (!canRun.value) {
+    ElMessage.warning('仅桌面端可用')
+    return
+  }
+  const targets = rows.value.filter((a) => isRpa(a.platform) && a.channel === 'rpa')
+  if (!targets.length) {
+    ElMessage.info('当前页没有 RPA 渠道账号')
+    return
+  }
+  let valid = 0
+  for (const row of targets) {
+    probing.value = new Set(probing.value).add(row.id)
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await probeLogin(row.platform, row.id, proxyRulesOf(row))
+      if (res.ok) {
+        if (res.valid) valid += 1
+        await accountApi
+          .update(row.id, { auth_status: res.valid ? 'valid' : 'expired' })
+          .catch(() => undefined)
+      }
+    } finally {
+      const next = new Set(probing.value)
+      next.delete(row.id)
+      probing.value = next
+    }
+  }
+  await load()
+  ElMessage.success(`批量探测完成：${valid}/${targets.length} 个有效`)
+}
+
 /** 已有 RPA 账号重新扫码绑定 */
 async function bind(row: SocialAccount): Promise<void> {
   if (!canRun.value) {
     ElMessage.warning('仅桌面端可用')
     return
   }
-  const res = await bindPlatform(row.platform, row.id)
+  const res = await bindPlatform(row.platform, row.id, proxyRulesOf(row))
   ElMessage[res.ok ? 'success' : 'warning'](res.message)
   if (res.ok) {
     await accountApi.reAuth(row.id).catch(() => undefined)

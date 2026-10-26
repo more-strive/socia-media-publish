@@ -1,7 +1,7 @@
 /** 应用内多标签第三方页面：WebContentsView 挂在主窗口，由渲染层 /browser 页上报显示区域 */
 import electron from 'electron'
 
-const { WebContentsView } = electron
+const { WebContentsView, session } = electron
 
 export interface TabInfo {
   id: number
@@ -65,7 +65,7 @@ export function resetTabs(): void {
   activeId = null
 }
 
-export function openTab(opts: { url: string; partition?: string; title?: string }): number {
+export function openTab(opts: { url: string; partition?: string; title?: string; proxyRules?: string }): number {
   const view = new WebContentsView({
     webPreferences: { partition: opts.partition, contextIsolation: true, nodeIntegration: false },
   })
@@ -76,7 +76,19 @@ export function openTab(opts: { url: string; partition?: string; title?: string 
     tab.title = title
     emit()
   })
-  void view.webContents.loadURL(opts.url)
+  // 账号绑定的代理：setProxy 生效后再加载页面，避免首屏仍走直连（代理随 partition 持久生效）
+  const load = (): void => {
+    void view.webContents.loadURL(opts.url)
+  }
+  if (opts.partition && opts.proxyRules) {
+    void session
+      .fromPartition(opts.partition)
+      .setProxy({ mode: 'fixed_servers', proxyRules: opts.proxyRules })
+      .then(load)
+      .catch(load)
+  } else {
+    load()
+  }
   activeId = id
   syncAttached()
   emit()

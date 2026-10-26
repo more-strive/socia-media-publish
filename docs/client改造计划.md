@@ -103,3 +103,10 @@
 - 适配器新增可选能力 `probe?`（ProbeResult）；IPC `rpa:probe(platform, accountId)`；composable `probeLogin`
 - AccountsView 行内"检测登录"按钮（逐行 loading），结果回写服务端 auth_status（AccountUpdateIn 新增可选 auth_status 字段，exclude_none 语义下安全）
 - 待办（M4 第二批）：partition 绑定代理（tabs.openTab 加 proxyRules + session.setProxy）、探测截图上传服务端归档、批量探测
+
+### M4 第二批（2026-10-26）：partition 绑代理 + 批量探测
+
+- tabs.openTab 支持 proxyRules：setProxy(fixed_servers) 生效后再 loadURL（防首屏直连竞态），代理随 partition 会话持久
+- 账号绑定的代理（proxy_id → ProxyIP）在视图侧拼装 scheme://host:port，经 rpa:login / rpa:probe 全链路透传到 openTab（登录即走代理，cookie 留在代理环境里）
+- AccountsView 工具栏新增"批量检测登录态"：顺序探测当前页 RPA 账号并回写 auth_status，逐行 loading，完成提示 N/M 有效
+- 局限：ProxyIP 类型无账密字段，认证代理需后续扩展（类型+server schema）；引擎发布路径的代理接入需服务端 claim 携带代理信息（M4 第三批）

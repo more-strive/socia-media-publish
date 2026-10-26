@@ -61,15 +61,15 @@ app.on('window-all-closed', () => {
 })
 // ---- RPA IPC（平台能力经适配器注册表分发，视图层不感知具体平台）----
 ipcMain.handle('platforms:list', () => rpaPlatforms())
-ipcMain.handle('rpa:login', (_e, platform: string, accountId: number) => {
+ipcMain.handle('rpa:login', (_e, platform: string, accountId: number, proxyRules?: string) => {
   const adapter = adapterOf(platform)
   if (!adapter) return { ok: false, message: '平台 ' + platform + ' 暂不支持 RPA 绑定' }
-  return adapter.login(accountId)
+  return adapter.login(accountId, proxyRules)
 })
-ipcMain.handle('rpa:probe', (_e, platform: string, accountId: number) => {
+ipcMain.handle('rpa:probe', (_e, platform: string, accountId: number, proxyRules?: string) => {
   const adapter = adapterOf(platform)
   if (!adapter?.probe) return { ok: false, valid: false, message: '平台 ' + platform + ' 暂不支持登录探测' }
-  return adapter.probe(accountId)
+  return adapter.probe(accountId, proxyRules)
 })
 
 // ---- 应用内标签页 ----

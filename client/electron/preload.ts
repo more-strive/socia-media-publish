@@ -25,11 +25,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   versions: { electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node },
   rpa: {
     /** 按平台打开扫码/登录标签页（主进程适配器注册表分发） */
-    login: (platform: string, accountId: number): Promise<{ ok: boolean; message: string; nickname?: string }> =>
-      ipcRenderer.invoke('rpa:login', platform, accountId),
+    login: (
+      platform: string,
+      accountId: number,
+      proxyRules?: string,
+    ): Promise<{ ok: boolean; message: string; nickname?: string }> =>
+      ipcRenderer.invoke('rpa:login', platform, accountId, proxyRules),
     /** 登录态探测（开页验证 + 截图留档，auth_status 回写由调用方负责） */
-    probe: (platform: string, accountId: number): Promise<{ ok: boolean; valid: boolean; message: string }> =>
-      ipcRenderer.invoke('rpa:probe', platform, accountId),
+    probe: (
+      platform: string,
+      accountId: number,
+      proxyRules?: string,
+    ): Promise<{ ok: boolean; valid: boolean; message: string }> =>
+      ipcRenderer.invoke('rpa:probe', platform, accountId, proxyRules),
   },
   platforms: {
     /** 已接入 RPA 的平台代码列表（视图据此判断平台能力） */

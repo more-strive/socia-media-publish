@@ -30,9 +30,12 @@ async function hasLoginCookie(accountId: number): Promise<boolean> {
 }
 
 /** 在应用内标签页打开抖音，等待用户扫码；检测到登录 cookie 即成功并关闭标签，尽力带回昵称 */
-export async function loginDouyin(accountId: number): Promise<{ ok: boolean; message: string; nickname?: string }> {
+export async function loginDouyin(
+  accountId: number,
+  proxyRules?: string,
+): Promise<{ ok: boolean; message: string; nickname?: string }> {
   if (await hasLoginCookie(accountId)) return { ok: true, message: '已有登录态，无需扫码' }
-  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '抖音扫码登录' })
+  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '抖音扫码登录', proxyRules })
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS
   while (Date.now() < deadline) {
@@ -198,11 +201,12 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
 /** 登录态探测（M4）：cookie 预检 + 开创作者首页验证是否被跳登录页，截图留档到 rpa-logs */
 export async function probeDouyinLogin(
   accountId: number,
+  proxyRules?: string,
 ): Promise<{ ok: boolean; valid: boolean; message: string }> {
   if (!(await hasLoginCookie(accountId))) {
     return { ok: true, valid: false, message: '无登录 cookie（未绑定或登录态已清理）' }
   }
-  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '检测登录态' })
+  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '检测登录态', proxyRules })
   try {
     await waitFor(tabWebContents(tabId) as electron.WebContents, `document.readyState === 'complete'`, 20_000, 1000)
     const wc = tabWebContents(tabId)

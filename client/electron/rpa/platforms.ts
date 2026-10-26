@@ -31,10 +31,10 @@ export interface PlatformAdapter {
   /** 平台标识，对应 server 侧 social_accounts.platform */
   code: string
   /** 扫码/登录绑定，成功后返回账号昵称 */
-  login(accountId: number): Promise<LoginResult>
+  login(accountId: number, proxyRules?: string): Promise<LoginResult>
   publish(input: PublishInput): Promise<PublishResult>
   /** 登录态探测（可选能力）：开页验证 cookie 是否仍有效 */
-  probe?(accountId: number): Promise<ProbeResult>
+  probe?(accountId: number, proxyRules?: string): Promise<ProbeResult>
 }
 
 const douyinAdapter: PlatformAdapter = {
