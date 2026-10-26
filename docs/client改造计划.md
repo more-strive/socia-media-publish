@@ -75,3 +75,18 @@
 | 工作台首页改版：待办（待审核数/失效账号数/RPA 队列）+ 快捷入口 + 核心数据卡片 | 待启动 |
 
 注：从自动化会话拉起蚁小二4.0.exe 会立即退出（无参 exit=0，带 --remote-debugging-port 为 exit=9），疑似 updater/elevate 提升链路或非交互会话防护，需在用户交互会话手动启动后再取证。
+
+## M6 补充实证：web 版（www.yixiaoer.cn/web）信息架构
+
+> 2026-10-26 通过 web 版 Vite bundle（入口 index-*.js，仅提取界面文案与路由路径）还原：
+
+- 路由：overview（数据总览，含达人/排行子页）、publish、tasks、accounts、environments、asset-library、social、team、order、operation-log、system-notifications、digital-human、long-article/editor、tryout
+- 账号页为三页签：账号管理 / 分组管理 / 指纹环境（"指纹环境"= 环境隔离管理，对应我方 M4 的 partition+代理方案，方向验证成立）
+- 私信评论在 web 版外跳 qdy.com，桌面端内置；商业化为"功能包"模式（私信评论包，资源席位不足/超额熔断自动禁用高级功能）
+- 快捷命令注册表：授权账号 / 批量授权失效账号 / 批量检测失效账号 / 打开收藏分组 / 发布视频命令
+
+### 本轮落地（M6 第二批）
+
+- 工作台改版：新增本机 RPA 引擎状态条（运行状态 + 当前任务 + 开关，仅桌面端显示）、汇总卡片补 托管账号(含失效数)/待审核/今日发布
+- 侧边栏分组结构已与 web 版 IA 对齐（分发/账号/互动/数据/创作/管理）
+- 后续可选：operation-log 操作日志、system-notifications 系统通知（服务端需新增对应表与接口）
