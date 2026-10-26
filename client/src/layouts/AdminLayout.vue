@@ -7,10 +7,16 @@
         <span class="font-bold text-16px">矩阵运营平台</span>
       </div>
       <el-menu :default-active="route.path" router class="border-none! flex-1 overflow-y-auto">
-        <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
+        <el-menu-item v-for="m in topMenus" :key="m.path" :index="m.path">
           <el-icon><component :is="m.icon" /></el-icon>
           <span>{{ m.label }}</span>
         </el-menu-item>
+        <el-menu-item-group v-for="g in menuGroups" :key="g.label" :title="g.label">
+          <el-menu-item v-for="m in g.items" :key="m.path" :index="m.path">
+            <el-icon><component :is="m.icon" /></el-icon>
+            <span>{{ m.label }}</span>
+          </el-menu-item>
+        </el-menu-item-group>
       </el-menu>
     </el-aside>
 
@@ -75,17 +81,33 @@ const router = useRouter()
 const auth = useAuthStore()
 const rpa = useRpaEngine()
 
-const menus = [
-  { path: '/dashboard', label: '工作台', icon: Monitor },
-  { path: '/accounts', label: '账号管理', icon: User },
-  { path: '/contents', label: '内容中心', icon: Document },
-  { path: '/publish', label: '一键分发', icon: Calendar },
-  { path: '/messages', label: '私信评论', icon: ChatDotRound },
-  { path: '/stats', label: '数据统计', icon: DataAnalysis },
-  { path: '/browser', label: '账号浏览器', icon: Platform },
-  { path: '/ai', label: 'AI 创作', icon: MagicStick },
-  { path: '/billing', label: '订阅与账单', icon: Coin },
-  { path: '/team', label: '团队管理', icon: Setting },
+const topMenus = [{ path: '/dashboard', label: '工作台', icon: Monitor }]
+// 侧边栏按业务域分组（对标蚁小二信息架构：分发 / 账号 / 互动 / 数据 / 创作 / 管理）
+const menuGroups = [
+  {
+    label: '内容分发',
+    items: [
+      { path: '/publish', label: '一键分发', icon: Calendar },
+      { path: '/contents', label: '内容中心', icon: Document },
+    ],
+  },
+  {
+    label: '账号运营',
+    items: [
+      { path: '/accounts', label: '账号管理', icon: User },
+      { path: '/browser', label: '账号浏览器', icon: Platform },
+    ],
+  },
+  { label: '互动', items: [{ path: '/messages', label: '私信评论', icon: ChatDotRound }] },
+  { label: '数据', items: [{ path: '/stats', label: '数据统计', icon: DataAnalysis }] },
+  { label: '创作', items: [{ path: '/ai', label: 'AI 创作', icon: MagicStick }] },
+  {
+    label: '管理',
+    items: [
+      { path: '/team', label: '团队管理', icon: Setting },
+      { path: '/billing', label: '订阅与账单', icon: Coin },
+    ],
+  },
 ]
 
 const teamName = computed(() => auth.team?.name ?? '')
