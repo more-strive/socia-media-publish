@@ -66,6 +66,11 @@ ipcMain.handle('rpa:login', (_e, platform: string, accountId: number) => {
   if (!adapter) return { ok: false, message: '平台 ' + platform + ' 暂不支持 RPA 绑定' }
   return adapter.login(accountId)
 })
+ipcMain.handle('rpa:probe', (_e, platform: string, accountId: number) => {
+  const adapter = adapterOf(platform)
+  if (!adapter?.probe) return { ok: false, valid: false, message: '平台 ' + platform + ' 暂不支持登录探测' }
+  return adapter.probe(accountId)
+})
 
 // ---- 应用内标签页 ----
 ipcMain.handle('tabs:open', (_e, opts: { url: string; partition?: string; title?: string }) => openTab(opts))

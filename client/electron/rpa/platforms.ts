@@ -1,6 +1,6 @@
 /** 平台适配器注册表：RPA 平台能力的统一抽象（对标蚁小二按平台拆分的在线脚本层）
  *  新平台接入：实现 PlatformAdapter 并在下方 registry 注册，引擎按 account.platform 分发 */
-import { loginDouyin, publishDouyinVideo } from './douyin'
+import { loginDouyin, probeDouyinLogin, publishDouyinVideo } from './douyin'
 
 export interface PublishInput {
   itemId: number
@@ -22,12 +22,19 @@ export interface LoginResult {
   nickname?: string
 }
 
+export interface ProbeResult {
+  ok: boolean
+  valid: boolean
+  message: string
+}
 export interface PlatformAdapter {
   /** 平台标识，对应 server 侧 social_accounts.platform */
   code: string
   /** 扫码/登录绑定，成功后返回账号昵称 */
   login(accountId: number): Promise<LoginResult>
   publish(input: PublishInput): Promise<PublishResult>
+  /** 登录态探测（可选能力）：开页验证 cookie 是否仍有效 */
+  probe?(accountId: number): Promise<ProbeResult>
 }
 
 const douyinAdapter: PlatformAdapter = {
@@ -35,6 +42,7 @@ const douyinAdapter: PlatformAdapter = {
   login: loginDouyin,
   publish: ({ itemId, accountId, title, mediaPath }) =>
     publishDouyinVideo({ accountId, itemId, title, videoPath: mediaPath }),
+  probe: probeDouyinLogin,
 }
 
 const registry: Record<string, PlatformAdapter> = { douyin: douyinAdapter }

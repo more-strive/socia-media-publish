@@ -80,6 +80,11 @@ function bindPlatform(platform: string, accountId: number): Promise<{ ok: boolea
   return window.electronAPI.rpa.login(platform, accountId)
 }
 
+/** 登录态探测（可选能力）：结果回写由调用方负责 */
+function probeLogin(platform: string, accountId: number): Promise<{ ok: boolean; valid: boolean; message: string }> {
+  if (!window.electronAPI?.rpa?.probe) return Promise.resolve({ ok: false, valid: false, message: '仅桌面端可用' })
+  return window.electronAPI.rpa.probe(platform, accountId)
+}
 export function useRpaEngine() {
-  return { enabled, busy, current, logs, canRun, running, start, toggle, bindPlatform }
+  return { enabled, busy, current, logs, canRun, running, start, toggle, bindPlatform, probeLogin }
 }

@@ -194,3 +194,27 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
     if (result.ok) closeTab(tabId)
   }
 }
+
+/** 登录态探测（M4）：cookie 预检 + 开创作者首页验证是否被跳登录页，截图留档到 rpa-logs */
+export async function probeDouyinLogin(
+  accountId: number,
+): Promise<{ ok: boolean; valid: boolean; message: string }> {
+  if (!(await hasLoginCookie(accountId))) {
+    return { ok: true, valid: false, message: '无登录 cookie（未绑定或登录态已清理）' }
+  }
+  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '检测登录态' })
+  try {
+    await waitFor(tabWebContents(tabId) as electron.WebContents, `document.readyState === 'complete'`, 20_000, 1000)
+    const wc = tabWebContents(tabId)
+    if (!wc) return { ok: false, valid: false, message: '页面已关闭' }
+    await sleep(3000)
+    const url = wc.getURL()
+    await shot(wc, `probe-douyin-${accountId}`)
+    const redirected = ['passport.douyin.com', '/login', 'sso.douyin'].some((k) => url.includes(k))
+    return redirected
+      ? { ok: true, valid: false, message: '登录态已失效（被跳转到登录页）' }
+      : { ok: true, valid: true, message: '登录态有效' }
+  } finally {
+    closeTab(tabId)
+  }
+}

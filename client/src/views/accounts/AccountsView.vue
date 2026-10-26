@@ -69,6 +69,7 @@
             <el-button v-if="isRpa(row.platform) && row.channel === 'rpa'" link type="success" @click="bind(row)">
               扫码绑定
             </el-button>
+<el-button v-if="isRpa(row.platform) && row.channel === 'rpa'" link type="info" :disabled="probing.has(row.id)" @click="probe(row)">{{ probing.has(row.id) ? '检测中…' : '检测登录' }}</el-button>
             <el-button v-else-if="row.auth_status !== 'valid'" link type="warning" @click="reAuth(row)">重新授权</el-button>
             <el-button link type="danger" @click="remove(row)">删除</el-button>
           </template>
@@ -214,8 +215,9 @@ import { PLATFORM_LABELS, type AccountGroup, type ProxyIP, type SocialAccount, t
 
 const rpa = useRpaEngine()
 const { isRpa } = usePlatforms()
-const { enabled, current, logs, canRun, toggle, bindPlatform } = rpa
+const { enabled, current, logs, canRun, toggle, bindPlatform, probeLogin } = rpa
 
+const probing = ref<Set<number>>(new Set())
 const channelLabels: Record<string, string> = { open_api: '开放 API', rpa: 'RPA', cloud_app: '云发布' }
 const tab = ref('accounts')
 const loading = ref(false)
@@ -304,6 +306,30 @@ async function save(): Promise<void> {
   }
 }
 
+/** RPA 登录态探测：开标签页验证，并把结果回写服务端 auth_status */
+async function probe(row: SocialAccount): Promise<void> {
+  if (!canRun.value) {
+    ElMessage.warning('仅桌面端可用')
+    return
+  }
+  probing.value = new Set(probing.value).add(row.id)
+  try {
+    const res = await probeLogin(row.platform, row.id)
+    if (!res.ok) {
+      ElMessage.warning(res.message)
+      return
+    }
+    ElMessage[res.valid ? 'success' : 'warning'](res.message)
+    await accountApi
+      .update(row.id, { auth_status: res.valid ? 'valid' : 'expired' })
+      .catch(() => undefined)
+    await load()
+  } finally {
+    const next = new Set(probing.value)
+    next.delete(row.id)
+    probing.value = next
+  }
+}
 /** 已有 RPA 账号重新扫码绑定 */
 async function bind(row: SocialAccount): Promise<void> {
   if (!canRun.value) {

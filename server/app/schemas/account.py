@@ -32,6 +32,7 @@ class AccountIn(BaseModel):
 
 
 class AccountUpdateIn(BaseModel):
+    auth_status: str | None = Field(default=None, pattern=r"^(valid|expired|invalid)$")
     group_id: int | None = None
     operator_id: int | None = None
     proxy_id: int | None = None

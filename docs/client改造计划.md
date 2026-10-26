@@ -96,3 +96,10 @@
 - IPC 改为平台无关：`platforms:list`（注册表清单）+ `rpa:login(platform, accountId)`（适配器分发），删除 `rpa:login-douyin` / `rpa:execute-douyin`（后者渲染层已无调用方，属 M0 引擎化后的死代码）
 - 渲染层新增 `usePlatforms()` composable；AccountsView 4 处 `platform === 'douyin'` 硬编码全部改 `isRpa(platform)` 能力查询
 - 新平台接入从"改 N 个视图"收敛为"实现 PlatformAdapter + 注册"两步
+
+### M4 第一批（2026-10-26）：登录探测
+
+- `probeDouyinLogin`：cookie 预检（无 cookie 直接判失效，不开窗）+ 开创作者首页验证是否被 302 登录页 + 截图留档 rpa-logs
+- 适配器新增可选能力 `probe?`（ProbeResult）；IPC `rpa:probe(platform, accountId)`；composable `probeLogin`
+- AccountsView 行内"检测登录"按钮（逐行 loading），结果回写服务端 auth_status（AccountUpdateIn 新增可选 auth_status 字段，exclude_none 语义下安全）
+- 待办（M4 第二批）：partition 绑定代理（tabs.openTab 加 proxyRules + session.setProxy）、探测截图上传服务端归档、批量探测

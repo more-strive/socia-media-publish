@@ -15,6 +15,7 @@ electronAPI?: {
   versions: { electron: string; chrome: string; node: string }
   rpa?: {
     login: (platform: string, accountId: number) => Promise<{ ok: boolean; message: string; nickname?: string }>
+    probe: (platform: string, accountId: number) => Promise<{ ok: boolean; valid: boolean; message: string }>
   }
   platforms?: {
     list: () => Promise<string[]>
