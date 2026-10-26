@@ -1,27 +1,20 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import electron from 'electron'
-
+import { initEngine, prepareMedia } from './engine'
 import { loginDouyin, publishDouyinVideo } from './rpa/douyin'
 import { activateTab, closeTab, initTabs, openTab, resetTabs, setTabBounds, tabsState } from './tabs'
-
 // ESM 下 electron 模块需默认导入再解构；无 __dirname，用 import.meta 推导
 const { app, BrowserWindow, ipcMain, shell } = electron
 const appDir = fileURLToPath(new URL('.', import.meta.url))
-
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
-
 let win: electron.BrowserWindow | null = null
-
 function preloadPath(): string {
   // vite-plugin-electron 输出 .mjs；兼容历史 .js
   const mjs = join(appDir, 'preload.mjs')
   return existsSync(mjs) ? mjs : join(appDir, 'preload.js')
 }
-
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1360,
@@ -38,12 +31,9 @@ function createWindow(): void {
       sandbox: false,
     },
   })
-
   win.on('ready-to-show', () => win?.show())
-
   initTabs(win)
   win.on('closed', resetTabs)
-
   // 开发诊断：渲染层 console 与异常转发到主进程日志
   // Electron 45 处于新旧事件参数过渡期，此处按旧签名取参（运行时实测有效）
   win.webContents.on('console-message', (_e, _level, message) => {
@@ -55,41 +45,39 @@ function createWindow(): void {
   win.webContents.on('did-fail-load', (_e, code, desc, url) => {
     console.error('[renderer] 加载失败:', code, desc, url)
   })
-
   // 外部链接交给系统浏览器打开
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
   })
-
   if (process.env.VITE_DEV_SERVER_URL) {
     void win.loadURL(process.env.VITE_DEV_SERVER_URL)
   } else {
     void win.loadFile(join(appDir, '../dist/index.html'))
   }
 }
-
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
-
 // ---- RPA IPC ----
-
-/** 素材准备：http(s) 下载到临时文件；本地路径直接使用 */
-async function prepareVideo(mediaUrl: string): Promise<string> {
-  if (!/^https?:\/\//.test(mediaUrl)) return mediaUrl
-  const res = await fetch(mediaUrl)
-  if (!res.ok) throw new Error(`素材下载失败 HTTP ${res.status}`)
-  const buf = Buffer.from(await res.arrayBuffer())
-  const name = mediaUrl.split('/').pop()?.split('?')[0] || 'video.mp4'
-  const dir = await mkdtemp(join(tmpdir(), 'smp-rpa-'))
-  const path = join(dir, name)
-  await writeFile(path, buf)
-  return path
-}
-
 ipcMain.handle('rpa:login-douyin', (_e, accountId: number) => loginDouyin(accountId))
-
+ipcMain.handle(
+  'rpa:execute-douyin',
+  async (_e, p: { item_id: number; account_id: number; title: string; media_url: string }) => {
+    try {
+      // 素材就位（流式下载）后执行平台流程；与引擎认领执行同源，避免两份下载逻辑
+      const mediaPath = await prepareMedia(p.media_url)
+      return await publishDouyinVideo({
+        accountId: p.account_id,
+        itemId: p.item_id,
+        title: p.title,
+        videoPath: mediaPath,
+      })
+    } catch (err) {
+      return { ok: false, message: String(err) }
+    }
+  },
+)
 // ---- 应用内标签页 ----
 ipcMain.handle('tabs:open', (_e, opts: { url: string; partition?: string; title?: string }) => openTab(opts))
 ipcMain.handle('tabs:activate', (_e, id: number) => activateTab(id))
@@ -98,30 +86,9 @@ ipcMain.handle('tabs:rect', (_e, rect: { x: number; y: number; width: number; he
   setTabBounds(rect)
 })
 ipcMain.handle('tabs:state', () => tabsState())
-
-ipcMain.handle(
-  'rpa:execute-douyin',
-  async (
-    _e,
-    payload: { item_id: number; account_id: number; title: string; media_url: string },
-  ): Promise<{ ok: boolean; message: string; publishUrl?: string }> => {
-    try {
-      const videoPath = await prepareVideo(payload.media_url)
-      return await publishDouyinVideo({
-        accountId: payload.account_id,
-        itemId: payload.item_id,
-        title: payload.title,
-        videoPath,
-      })
-    } catch (err) {
-      return { ok: false, message: String(err) }
-    }
-  },
-)
-
+// ---- RPA 引擎（主进程常驻认领-执行-回报，见 docs/client改造计划.md M0）----
+initEngine()
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
-
 void app.whenReady().then(createWindow)
-
