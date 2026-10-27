@@ -17,7 +17,6 @@ const router = createRouter({
         { path: 'publish', name: 'publish', component: () => import('@/views/publish/PublishView.vue'), meta: { title: '一键分发' } },
         { path: 'messages', name: 'messages', component: () => import('@/views/messages/MessagesView.vue'), meta: { title: '私信评论' } },
         { path: 'stats', name: 'stats', component: () => import('@/views/stats/StatsView.vue'), meta: { title: '数据统计' } },
-        { path: 'browser', name: 'browser', component: () => import('@/views/browser/BrowserView.vue'), meta: { title: '账号浏览器' } },
         { path: 'ai', name: 'ai', component: () => import('@/views/ai/AiView.vue'), meta: { title: 'AI 创作' } },
         { path: 'billing', name: 'billing', component: () => import('@/views/billing/BillingView.vue'), meta: { title: '订阅与账单' } },
         { path: 'team', name: 'team', component: () => import('@/views/team/TeamView.vue'), meta: { title: '团队管理' } },

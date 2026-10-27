@@ -4,10 +4,15 @@
     <div class="flex-between">
       <div>
         <span class="font-bold">RPA 自动发布引擎</span>
-        <span class="text-muted ml-2 text-12px">抖音等无开放 API 平台由本机浏览器自动执行；先给 RPA 通道账号扫码绑定，再开启引擎；扫码/发布页面在「账号浏览器」标签页中打开</span>
+        <span class="text-muted ml-2 text-12px">抖音等无开放 API 平台由本机浏览器自动执行；先给 RPA 通道账号扫码绑定，再开启引擎；扫码/发布页面以顶部标签页打开</span>
       </div>
       <div class="flex items-center gap-3">
         <el-tag v-if="current" size="small" type="warning">执行中：{{ current.account.nickname }}</el-tag>
+        <el-button
+          v-if="pendingCount > 0 && !enabled"
+          size="small" type="warning" :disabled="!canRun"
+          @click="toggle(true)"
+        >有 {{ pendingCount }} 条待执行，点击开启</el-button>
         <span v-if="!canRun" class="text-muted text-12px">仅桌面端可用</span>
         <el-switch :model-value="enabled" :disabled="!canRun" @change="toggle" />
       </div>
@@ -239,7 +244,7 @@ import { PLATFORM_LABELS, type AccountGroup, type ProxyConfig, type ProxyIP, typ
 
 const rpa = useRpaEngine()
 const { isRpa } = usePlatforms()
-const { enabled, current, logs, canRun, toggle, bindPlatform, probeLogin } = rpa
+const { enabled, current, logs, canRun, pendingCount, toggle, bindPlatform, probeLogin } = rpa
 
 const probing = ref<Set<number>>(new Set())
 const channelLabels: Record<string, string> = { open_api: '开放 API', rpa: 'RPA', cloud_app: '云发布' }

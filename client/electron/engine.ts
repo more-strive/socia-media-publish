@@ -45,6 +45,8 @@ export interface EngineStatus {
   busy: boolean
   deviceId: string
   current: EngineClaim | null
+  /** 待认领条目数（引擎未开启时也持续探测，供状态条提醒） */
+  pendingCount: number
   logs: string[]
 }
 
@@ -53,6 +55,7 @@ export type EngineEvent =
   | { type: 'claim'; item: EngineClaim }
   | { type: 'done'; item: EngineClaim; ok: boolean; message: string }
   | { type: 'auth-expired' }
+  | { type: 'pending'; count: number }
 
 interface EngineStartOpts {
   baseUrl: string
@@ -66,6 +69,8 @@ let timer: ReturnType<typeof setInterval> | null = null
 let busy = false
 let authPaused = false
 let current: EngineClaim | null = null
+let pendingCount = 0
+let peekSeq = 0
 const logs: string[] = []
 
 // ---- 持久化（userData/engine.json）：device_id 与自动执行开关 ----
@@ -106,12 +111,12 @@ function broadcast(ev: EngineEvent): void {
 }
 
 // ---- server API（token 由渲染层注入；401 抛 AuthExpiredError 并暂停循环）----
-async function api<T>(path: string, body: unknown): Promise<T> {
+async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
   if (!creds) throw new Error('引擎未启动')
   const res = await fetch(`${creds.baseUrl}${path}`, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.token}` },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
   })
   if (res.status === 401) {
@@ -124,6 +129,10 @@ async function api<T>(path: string, body: unknown): Promise<T> {
   const json = (await res.json()) as { code: number; data: T }
   if (json.code !== 0) throw new Error(`业务错误 code=${json.code}`)
   return json.data
+}
+
+async function api<T>(path: string, body: unknown): Promise<T> {
+  return request<T>('POST', path, body)
 }
 
 async function report(payload: {
@@ -177,6 +186,9 @@ async function executeOne(item: EngineClaim): Promise<void> {
       itemId: item.item_id,
       accountId: item.account.id,
       title: item.content.title,
+      // 话题/摘要随素材下发：标题按平台规则拼接话题（util.withTopics）
+      tags: item.content.tags,
+      summary: item.content.summary,
       mediaPath,
       proxy: item.account.proxy ?? undefined,
     })
@@ -200,8 +212,30 @@ async function executeOne(item: EngineClaim): Promise<void> {
   }
 }
 
+/** 待认领条目数探测：引擎开关未开时也要让用户看见"有活没人干"，避免任务静默积压 */
+async function peekPending(): Promise<void> {
+  try {
+    const data = await request<{ count: number }>('GET', '/publish/rpa/pending-count')
+    const n = Number(data?.count ?? 0)
+    if (n !== pendingCount) {
+      pendingCount = n
+      broadcast({ type: 'pending', count: n })
+      if (n > 0 && !state.enabled) log(`检测到 ${n} 条待执行条目，开启自动执行后将自动认领发布`)
+    }
+  } catch {
+    /* 探测失败静默（网络抖动），下轮再试 */
+  }
+}
+
 async function tick(): Promise<void> {
-  if (busy || !creds || !state.enabled || authPaused) return
+  if (!creds) return
+  // 未开启/暂停/执行中：不认领，仅低频探测待执行数（约 20s 一次）供状态条提醒
+  if (busy || !state.enabled || authPaused) {
+    peekSeq += 1
+    if (peekSeq % 4 === 1) await peekPending()
+    return
+  }
+  peekSeq = 0
   busy = true
   try {
     const data = await api<EngineClaim[] | { items?: EngineClaim[] }>('/publish/rpa/claim', {
@@ -235,7 +269,15 @@ function stop(): void {
 }
 
 function status(): EngineStatus {
-  return { running: timer !== null, enabled: state.enabled, busy, deviceId: state.deviceId, current, logs: [...logs] }
+  return {
+    running: timer !== null,
+    enabled: state.enabled,
+    busy,
+    deviceId: state.deviceId,
+    current,
+    pendingCount,
+    logs: [...logs],
+  }
 }
 
 /** 注册 engine IPC；应用启动即挂载（循环要等渲染层注入凭证 start 才开跑） */

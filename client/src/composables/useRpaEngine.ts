@@ -1,12 +1,12 @@
 /** RPA 引擎控制台：执行循环在主进程（electron/engine.ts），这里只做凭证注入与状态镜像
  *  对外 API 与旧版渲染层轮询实现保持一致，AdminLayout/AccountsView 无感切换 */
 import { computed, ref } from 'vue'
-import router from '@/router'
 import type { ProxyConfig, RpaClaimItem } from '@/types'
 
 const enabled = ref(false)
 const busy = ref(false)
 const running = ref(false)
+const pendingCount = ref(0)
 const current = ref<RpaClaimItem | null>(null)
 const logs = ref<string[]>([])
 let bound = false
@@ -37,6 +37,7 @@ async function syncStatus(): Promise<void> {
   enabled.value = s.enabled
   busy.value = s.busy
   running.value = s.running
+  pendingCount.value = s.pendingCount ?? 0
   current.value = (s.current as RpaClaimItem | null) ?? null
   if (logs.value.length === 0) logs.value = [...s.logs]
 }
@@ -57,10 +58,11 @@ async function start(): Promise<void> {
       pushLog(String(ev.line))
     } else if (ev.type === 'claim') {
       current.value = ev.item as RpaClaimItem
-      // 跳到账号浏览器页展示自动化过程（主进程执行不依赖页面存活）
-      void router.push('/browser')
+      // 浏览器 Shell 下平台标签全局可见，引擎自动激活标签即可（无需跳转控制台页面）
     } else if (ev.type === 'done') {
       current.value = null
+    } else if (ev.type === 'pending') {
+      pendingCount.value = Number(ev.count ?? 0)
     } else if (ev.type === 'auth-expired') {
       // 渲染层 http 拦截器会刷新 localStorage 里的 token，这里重注入即可恢复
       void inject()
@@ -80,7 +82,6 @@ function bindPlatform(
   proxy?: ProxyConfig,
 ): Promise<{ ok: boolean; message: string; nickname?: string }> {
   if (!window.electronAPI?.rpa?.login) return Promise.resolve({ ok: false, message: '仅桌面端可用' })
-  void router.push('/browser')
   return window.electronAPI.rpa.login(platform, accountId, proxy)
 }
 
@@ -95,5 +96,5 @@ function probeLogin(
   return window.electronAPI.rpa.probe(platform, accountId, proxy, token ? { baseUrl: engineBaseUrl(), token } : undefined)
 }
 export function useRpaEngine() {
-  return { enabled, busy, current, logs, canRun, running, start, toggle, bindPlatform, probeLogin }
+  return { enabled, busy, current, logs, canRun, running, pendingCount, start, toggle, bindPlatform, probeLogin }
 }

@@ -9,9 +9,13 @@
       </el-tag>
       <span v-if="currentTitle" class="text-muted">正在发布：{{ currentTitle }}</span>
       <span v-else class="text-muted">空闲，等待认领任务</span>
+      <el-button
+        v-if="pendingCount > 0 && !engineEnabled"
+        size="small" type="warning" :disabled="!canRun || busy"
+        @click="toggle(true)"
+      >有 {{ pendingCount }} 条待执行，点击开启</el-button>
       <div class="flex-1" />
       <el-switch :model-value="engineEnabled" :disabled="!canRun || busy" @change="(v: unknown) => toggle(Boolean(v))" />
-      <el-link type="primary" @click="router.push('/browser')">账号浏览器</el-link>
     </div>
     <!-- 汇总卡片 -->
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
@@ -88,6 +92,7 @@ const isDesktop = !!window.electronAPI?.engine
 const engineEnabled = computed(() => unref(rpa.enabled))
 const engineRunning = computed(() => unref(rpa.running))
 const busy = computed(() => unref(rpa.busy))
+const pendingCount = computed(() => unref(rpa.pendingCount))
 const canRun = computed(() => unref(rpa.canRun))
 const currentTitle = computed(
   () => (unref(rpa.current) as { title?: string } | null)?.title ?? '',

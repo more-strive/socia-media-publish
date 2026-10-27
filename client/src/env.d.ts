@@ -39,6 +39,7 @@ electronAPI?: {
       busy: boolean
       deviceId: string
       current: unknown
+      pendingCount: number
       logs: string[]
     }>
     onEvent: (cb: (ev: { type: string } & Record<string, unknown>) => void) => () => void
@@ -50,11 +51,22 @@ electronAPI?: {
       title?: string
       proxy?: { scheme: string; host: string; port: number; username?: string | null; password?: string | null }
     }) => Promise<number>
-    activate: (id: number) => Promise<void>
+    activate: (id: number | null) => Promise<void>
     close: (id: number) => Promise<void>
+    navigate: (id: number, url: string) => Promise<void>
+    nav: (id: number, action: 'back' | 'forward' | 'reload') => Promise<void>
+    quickLinks: () => Promise<{ code: string; name: string; url: string }[]>
     rect: (rect: { x: number; y: number; width: number; height: number } | null) => Promise<void>
-    state: () => Promise<{ tabs: { id: number; title: string; url: string }[]; activeId: number | null }>
-    onChanged: (cb: (s: { tabs: { id: number; title: string; url: string }[]; activeId: number | null }) => void) => () => void
+    state: () => Promise<{
+      tabs: { id: number; title: string; url: string; loading: boolean; canBack: boolean; canFwd: boolean }[]
+      activeId: number | null
+    }>
+    onChanged: (
+      cb: (s: {
+        tabs: { id: number; title: string; url: string; loading: boolean; canBack: boolean; canFwd: boolean }[]
+        activeId: number | null
+      }) => void,
+    ) => () => void
   }
 }
 }

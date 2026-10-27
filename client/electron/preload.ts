@@ -1,7 +1,15 @@
 import electron from 'electron'
 const { contextBridge, ipcRenderer } = electron
+interface TabItem {
+  id: number
+  title: string
+  url: string
+  loading: boolean
+  canBack: boolean
+  canFwd: boolean
+}
 interface TabsState {
-  tabs: { id: number; title: string; url: string }[]
+  tabs: TabItem[]
   activeId: number | null
 }
 interface EngineStatus {
@@ -10,14 +18,16 @@ interface EngineStatus {
   busy: boolean
   deviceId: string
   current: unknown
+  pendingCount: number
   logs: string[]
 }
 interface EngineEvent {
-  type: 'log' | 'claim' | 'done' | 'auth-expired'
+  type: 'log' | 'claim' | 'done' | 'auth-expired' | 'pending'
   line?: string
   item?: unknown
   ok?: boolean
   message?: string
+  count?: number
 }
 interface ElectronProxy {
   scheme: string
@@ -68,8 +78,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tabs: {
     open: (opts: { url: string; partition?: string; title?: string; proxy?: ElectronProxy }): Promise<number> =>
       ipcRenderer.invoke('tabs:open', opts),
-    activate: (id: number): Promise<void> => ipcRenderer.invoke('tabs:activate', id),
+    activate: (id: number | null): Promise<void> => ipcRenderer.invoke('tabs:activate', id),
     close: (id: number): Promise<void> => ipcRenderer.invoke('tabs:close', id),
+    /** 地址栏导航（裸域名自动补 https） */
+    navigate: (id: number, url: string): Promise<void> => ipcRenderer.invoke('tabs:navigate', id, url),
+    /** 后退/前进/刷新 */
+    nav: (id: number, action: 'back' | 'forward' | 'reload'): Promise<void> =>
+      ipcRenderer.invoke('tabs:nav', id, action),
+    /** 新标签快捷入口（各平台创作者中心） */
+    quickLinks: (): Promise<{ code: string; name: string; url: string }[]> =>
+      ipcRenderer.invoke('tabs:quick-links'),
     rect: (rect: { x: number; y: number; width: number; height: number } | null): Promise<void> =>
       ipcRenderer.invoke('tabs:rect', rect),
     state: (): Promise<TabsState> => ipcRenderer.invoke('tabs:state'),

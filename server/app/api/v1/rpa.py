@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.api.deps import CurrentUser, DbDep, require_roles
 from app.core.config import settings
@@ -44,6 +44,26 @@ class ReportIn(BaseModel):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+@router.get("/pending-count", summary="待认领条目数（引擎开关未开时的提醒，不改变条目状态）")
+async def pending_count(user: CurrentUser, db: DbDep):
+    n = (
+        await db.execute(
+            select(func.count())
+            .select_from(PublishItem)
+            .join(SocialAccount, PublishItem.account_id == SocialAccount.id)
+            .join(PublishTask, PublishItem.task_id == PublishTask.id)
+            .where(
+                PublishItem.status == PublishItemStatus.pending.value,
+                PublishTask.status == PublishTaskStatus.publishing.value,
+                PublishTask.team_id == user.team_id,
+                SocialAccount.channel == "rpa",
+                SocialAccount.auth_status == "valid",
+            )
+        )
+    ).scalar()
+    return ok({"count": int(n or 0)})
 
 
 @router.post("/claim", summary="认领待执行条目（桌面客户端轮询）")

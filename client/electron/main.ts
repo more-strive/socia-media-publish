@@ -6,7 +6,7 @@ import { initEngine } from './engine'
 import { initProxyAuth, type ProxyConfig } from './proxy'
 import { adapterOf, rpaPlatforms } from './rpa/platforms'
 import { uploadScreenshot, type ServerCreds } from './upload'
-import { activateTab, closeTab, initTabs, openTab, resetTabs, setTabBounds, tabsState } from './tabs'
+import { activateTab, closeTab, initTabs, navTab, navigateTab, openTab, quickLinks, resetTabs, setTabBounds, tabsState } from './tabs'
 // ESM 下 electron 模块需默认导入再解构；无 __dirname，用 import.meta 推导
 const { app, BrowserWindow, ipcMain, shell } = electron
 const appDir = fileURLToPath(new URL('.', import.meta.url))
@@ -88,8 +88,11 @@ ipcMain.handle(
   'tabs:open',
   (_e, opts: { url: string; partition?: string; title?: string; proxy?: ProxyConfig }) => openTab(opts),
 )
-ipcMain.handle('tabs:activate', (_e, id: number) => activateTab(id))
+ipcMain.handle('tabs:activate', (_e, id: number | null) => activateTab(id))
 ipcMain.handle('tabs:close', (_e, id: number) => closeTab(id))
+ipcMain.handle('tabs:navigate', (_e, id: number, url: string) => navigateTab(id, url))
+ipcMain.handle('tabs:nav', (_e, id: number, action: 'back' | 'forward' | 'reload') => navTab(id, action))
+ipcMain.handle('tabs:quick-links', () => quickLinks())
 ipcMain.handle('tabs:rect', (_e, rect: { x: number; y: number; width: number; height: number } | null) => {
   setTabBounds(rect)
 })
