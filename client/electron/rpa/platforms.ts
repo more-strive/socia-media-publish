@@ -32,6 +32,9 @@ export interface LoginResult {
   ok: boolean
   message: string
   nickname?: string
+  /** 平台侧账号唯一 ID（蚁小二实证：抖音取 media/user/info 的 user.uid），回写 platform_account_id 防重复绑定 */
+  platformUid?: string
+  avatar?: string
 }
 
 export interface ProbeResult {

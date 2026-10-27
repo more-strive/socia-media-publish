@@ -75,12 +75,12 @@ async function toggle(v: boolean | string | number): Promise<void> {
   await window.electronAPI?.engine?.setEnabled(!!v)
 }
 
-/** 按平台打开扫码登录标签页（主进程适配器分发），返回结果由调用方提示 */
+/** 按平台打开扫码登录标签页（主进程适配器分发），成功带回平台账号身份；结果提示与回写由调用方负责 */
 function bindPlatform(
   platform: string,
   accountId: number,
   proxy?: ProxyConfig,
-): Promise<{ ok: boolean; message: string; nickname?: string }> {
+): Promise<{ ok: boolean; message: string; nickname?: string; platformUid?: string; avatar?: string }> {
   if (!window.electronAPI?.rpa?.login) return Promise.resolve({ ok: false, message: '仅桌面端可用' })
   return window.electronAPI.rpa.login(platform, accountId, proxy)
 }

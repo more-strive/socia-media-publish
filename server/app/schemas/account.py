@@ -39,6 +39,9 @@ class AccountUpdateIn(BaseModel):
     region: str | None = None
     note: str | None = None
     nickname: str | None = Field(default=None, min_length=1, max_length=128)
+    # 扫码绑定成功后由桌面端回填的平台身份（platform_account_id 用于防重复绑定）
+    platform_account_id: str | None = Field(default=None, max_length=128)
+    avatar: str | None = Field(default=None, max_length=512)
     last_probe_screenshot: str | None = Field(default=None, max_length=512)
 
 

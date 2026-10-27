@@ -41,12 +41,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   versions: { electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node },
   rpa: {
-    /** 按平台打开扫码/登录标签页（主进程适配器注册表分发） */
+    /** 按平台打开扫码/登录标签页（主进程适配器注册表分发），成功带回平台账号身份（昵称/UID/头像） */
     login: (
       platform: string,
       accountId: number,
       proxy?: ElectronProxy,
-    ): Promise<{ ok: boolean; message: string; nickname?: string }> =>
+    ): Promise<{ ok: boolean; message: string; nickname?: string; platformUid?: string; avatar?: string }> =>
       ipcRenderer.invoke('rpa:login', platform, accountId, proxy),
     /** 登录态探测（开页验证 + 截图归档；auth_status 回写由调用方负责） */
     probe: (

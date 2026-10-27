@@ -136,13 +136,25 @@ async def create_account(payload: AccountIn, user: CurrentUser, db: DbDep):
     return ok(AccountOut.model_validate(account).model_dump(mode="json"))
 
 
-@router.put("/{account_id}", summary="更新账号（分组/运营人/代理/区域）")
+@router.put("/{account_id}", summary="更新账号（分组/运营人/代理/区域/平台身份）")
 async def update_account(account_id: int, payload: AccountUpdateIn, user: CurrentUser, db: DbDep):
     account = await db.scalar(
         select(SocialAccount).where(SocialAccount.id == account_id, SocialAccount.team_id == user.team_id)
     )
     if account is None:
         raise NotFoundError("账号不存在")
+    # 扫码绑定回填平台 UID 时校验唯一：同团队同平台一个平台账号只能绑一条记录
+    if payload.platform_account_id:
+        dup = await db.scalar(
+            select(SocialAccount).where(
+                SocialAccount.team_id == user.team_id,
+                SocialAccount.platform == account.platform,
+                SocialAccount.platform_account_id == payload.platform_account_id,
+                SocialAccount.id != account.id,
+            )
+        )
+        if dup is not None:
+            raise BizError(409, f"该{account.platform}账号已绑定在「{dup.nickname}」，请勿重复绑定")
     # exclude_unset：仅覆盖客户端显式传入的字段（传 null 即清空代理/分组等可空关联）
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(account, k, v)

@@ -48,8 +48,14 @@
       <el-table :data="rows" class="page-card" v-loading="loading">
         <el-table-column label="昵称" min-width="160">
           <template #default="{ row }">
-            <span class="font-medium">{{ row.nickname }}</span>
-            <el-tag size="small" class="ml-2">{{ platformLabel(row.platform) }}</el-tag>
+            <div class="flex items-center gap-2">
+              <el-image v-if="row.avatar" :src="row.avatar" fit="cover" class="w-6 h-6 rounded-full shrink-0" />
+              <span
+                class="font-medium"
+                :title="row.platform_account_id ? `平台 UID：${row.platform_account_id}` : undefined"
+              >{{ row.nickname }}</span>
+              <el-tag size="small">{{ platformLabel(row.platform) }}</el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="分组" width="100">
@@ -149,13 +155,11 @@
           </el-select>
         </el-form-item>
         <el-form-item label="账号昵称">
-          <el-input v-model="form.nickname" placeholder="本地标识，抖音扫码成功后自动更新" />
+          <el-input v-model="form.nickname" placeholder="选填；RPA 扫码成功后自动回填平台昵称" />
         </el-form-item>
         <el-form-item label="发布通道">
           <el-select v-model="form.channel" class="w-full">
-            <el-option label="开放平台 API" value="open_api" />
-            <el-option label="浏览器 RPA" value="rpa" />
-            <el-option label="App 云发布" value="cloud_app" />
+            <el-option v-for="c in channelOptions" :key="c" :label="channelLabels[c] ?? c" :value="c" />
           </el-select>
         </el-form-item>
         <el-form-item label="粉丝数">
@@ -234,7 +238,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { accountApi, proxyApi, userApi } from '@/api/modules'
 import { usePlatforms } from '@/composables/usePlatforms'
@@ -263,6 +267,16 @@ const newGroupName = ref('')
 const formVisible = ref(false)
 const editing = ref<SocialAccount | null>(null)
 const form = reactive<Record<string, unknown>>({})
+/** 有官方发布 API 的平台（公众号/TikTok/YouTube）；其余平台（抖音/快手/小红书等）无公开发布 API，只能走 RPA/云发布 */
+const API_CHANNEL_PLATFORMS = new Set(['wechat_gzh', 'tiktok', 'youtube'])
+// 依赖 form，必须声明在 form 之后（watch 注册即求值，提前会 TDZ 报错导致整页白屏）
+const channelOptions = computed(() =>
+  API_CHANNEL_PLATFORMS.has(String(form.platform)) ? ['open_api'] : ['rpa', 'cloud_app'],
+)
+// 切换平台后当前通道不可用时，回落到首个可用通道
+watch(channelOptions, (opts) => {
+  if (!opts.includes(String(form.channel))) form.channel = opts[0]
+})
 
 const proxies = ref<ProxyIP[]>([])
 const proxyVisible = ref(false)
@@ -288,7 +302,7 @@ async function loadMeta(): Promise<void> {
 
 function openCreate(): void {
   editing.value = null
-  Object.assign(form, { platform: 'douyin', nickname: '', channel: 'open_api', fans_count: 0, group_id: null, operator_id: null, proxy_id: null, region: '', note: '' })
+  Object.assign(form, { platform: 'douyin', nickname: '', channel: 'rpa', fans_count: 0, group_id: null, operator_id: null, proxy_id: null, region: '', note: '' })
   formVisible.value = true
 }
 
@@ -299,8 +313,11 @@ function openEdit(row: SocialAccount): void {
 }
 
 async function save(): Promise<void> {
-  if (!editing.value && !String(form.nickname ?? '').trim()) {
-    ElMessage.warning('请填写账号昵称（扫码成功后会自动更新为平台昵称）')
+  // RPA 扫码账号昵称选填：扫码前本就不知道是谁的号，扫成功后回填平台昵称
+  // （只看通道选择，不依赖 isRpa 能力查询——网页端无 electron IPC 时同样放行，桌面端扫码后回填）
+  const rpaCreate = !editing.value && form.channel === 'rpa'
+  if (!editing.value && !String(form.nickname ?? '').trim() && !rpaCreate) {
+    ElMessage.warning('请填写账号昵称')
     return
   }
   saving.value = true
@@ -311,20 +328,22 @@ async function save(): Promise<void> {
       formVisible.value = false
       await load()
     } else {
-      const created = await accountApi.create(form)
+      // 服务端要求昵称非空：RPA 留空时先占位，扫码回填时覆盖
+      const payload = { ...form }
+      if (rpaCreate && !String(payload.nickname ?? '').trim()) {
+        payload.nickname = `${PLATFORM_LABELS[String(payload.platform)] ?? String(payload.platform)}·待识别`
+      }
+      const created = await accountApi.create(payload)
       formVisible.value = false
       await load()
-      // RPA 渠道账号：创建后直接进入扫码绑定，并回填平台昵称
+      // RPA 渠道账号：创建后直接进入扫码绑定，并回填平台身份（昵称/UID/头像）
       if (isRpa(created.platform) && created.channel === 'rpa' && canRun.value) {
-        ElMessage.info('账号已创建，正在打开抖音扫码页（账号浏览器标签页）')
+        ElMessage.info(`账号已创建，正在打开${platformLabel(created.platform)}扫码页（账号浏览器标签页）`)
         const res = await bindPlatform(created.platform, created.id, proxyOf(created))
         ElMessage[res.ok ? 'success' : 'warning'](res.message)
         if (res.ok) {
           await accountApi.reAuth(created.id).catch(() => undefined)
-          if (res.nickname) {
-            await accountApi.update(created.id, { nickname: res.nickname }).catch(() => undefined)
-            await load()
-          }
+          await backfillIdentity(created.id, res)
         }
       } else {
         ElMessage.success('已保存')
@@ -413,6 +432,20 @@ async function probeAll(): Promise<void> {
   ElMessage.success(`批量探测完成：${valid}/${targets.length} 个有效`)
 }
 
+/** 扫码成功后回填平台身份（UID/昵称/头像）；同一平台账号绑到别的记录时服务端报错由 http 层统一弹出 */
+async function backfillIdentity(
+  accountId: number,
+  res: { nickname?: string; platformUid?: string; avatar?: string },
+): Promise<void> {
+  const patch: Record<string, unknown> = {}
+  if (res.platformUid) patch.platform_account_id = res.platformUid
+  if (res.nickname) patch.nickname = res.nickname
+  if (res.avatar) patch.avatar = res.avatar
+  if (!Object.keys(patch).length) return
+  await accountApi.update(accountId, patch).catch(() => undefined)
+  await load()
+}
+
 /** 已有 RPA 账号重新扫码绑定 */
 async function bind(row: SocialAccount): Promise<void> {
   if (!canRun.value) {
@@ -423,10 +456,7 @@ async function bind(row: SocialAccount): Promise<void> {
   ElMessage[res.ok ? 'success' : 'warning'](res.message)
   if (res.ok) {
     await accountApi.reAuth(row.id).catch(() => undefined)
-    if (res.nickname && res.nickname !== row.nickname) {
-      await accountApi.update(row.id, { nickname: res.nickname }).catch(() => undefined)
-    }
-    await load()
+    await backfillIdentity(row.id, res)
   }
 }
 

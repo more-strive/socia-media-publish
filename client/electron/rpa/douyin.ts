@@ -21,12 +21,67 @@ async function hasLoginCookie(accountId: number): Promise<boolean> {
   return cookies.some((c) => c.name === 'sessionid' || c.name === 'sessionid_ss')
 }
 
-/** 在应用内标签页打开抖音，等待用户扫码；检测到登录 cookie 即成功并关闭标签，尽力带回昵称 */
+/** 账号身份（蚁小二 getDouyinUserInfo 实证：uid/nickname/avatar_thumb.url_list[0]） */
+interface DouyinIdentity {
+  uid?: string
+  nickname?: string
+  avatar?: string
+}
+
+/** 在已登录的 creator.douyin.com 页面里同源拉取账号身份
+ *  主接口 /web/api/media/user/info，/aweme/v1/creator/user/info/ 兜底；
+ *  失败返回空对象（不影响登录成功判定，调用方保留原昵称） */
+async function fetchDouyinIdentity(wc: electron.WebContents): Promise<DouyinIdentity> {
+  try {
+    const r = await wc.executeJavaScript(`
+      (async () => {
+        try {
+          const pick = (x) => {
+            const u = x && (x.user_info || x.user || (x.data && (x.data.user_info || x.data.user)))
+            if (!u || !u.uid) return null
+            return {
+              uid: String(u.uid),
+              nickname: (u.nickname || '').slice(0, 60),
+              avatar: (u.avatar_thumb && u.avatar_thumb.url_list && u.avatar_thumb.url_list[0]) || '',
+            }
+          }
+          let d = await fetch('/web/api/media/user/info', { credentials: 'include' }).then((r) => r.json()).catch(() => null)
+          let u = pick(d)
+          if (!u) {
+            d = await fetch('/aweme/v1/creator/user/info/', { credentials: 'include' }).then((r) => r.json()).catch(() => null)
+            u = pick(d)
+          }
+          return u || {}
+        } catch { return {} }
+      })()`)
+    return (r as DouyinIdentity) ?? {}
+  } catch {
+    return {}
+  }
+}
+
+/** 已有登录态时也要回填身份（重绑场景）：短开一个创作者首页标签取数即关 */
+async function identityOfExistingLogin(accountId: number, proxy?: ProxyConfig): Promise<DouyinIdentity> {
+  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '抖音账号识别', proxy })
+  try {
+    const wc0 = tabWebContents(tabId)
+    if (wc0) await waitFor(wc0, `document.readyState === 'complete'`, 20_000, 1000)
+    const wc = tabWebContents(tabId)
+    return wc ? await fetchDouyinIdentity(wc) : {}
+  } finally {
+    closeTab(tabId)
+  }
+}
+
+/** 在应用内标签页打开抖音，等待用户扫码；检测到登录 cookie 即成功并关闭标签，带回平台账号身份 */
 export async function loginDouyin(
   accountId: number,
   proxy?: ProxyConfig,
-): Promise<{ ok: boolean; message: string; nickname?: string }> {
-  if (await hasLoginCookie(accountId)) return { ok: true, message: '已有登录态，无需扫码' }
+): Promise<{ ok: boolean; message: string; nickname?: string; platformUid?: string; avatar?: string }> {
+  if (await hasLoginCookie(accountId)) {
+    const id = await identityOfExistingLogin(accountId, proxy)
+    return { ok: true, message: '已有登录态，无需扫码', ...id }
+  }
   const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '抖音扫码登录', proxy })
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS
@@ -35,18 +90,21 @@ export async function loginDouyin(
     const wc = tabWebContents(tabId)
     if (!wc) return { ok: false, message: '页面已关闭，未完成登录' } // 用户手动关了标签
     if (await hasLoginCookie(accountId)) {
-      // 尽力读取账号昵称（选择器不确定，多候选取第一个非空；失败不影响登录结果）
-      let nickname: string | undefined
-      try {
-        const name = await wc.executeJavaScript(`
-          (document.querySelector('.user-info .name, .account-name, .nick-name, [class*="nickname"]')
-            ?.textContent || '').trim()`)
-        if (name) nickname = name.slice(0, 60)
-      } catch {
-        /* 尽力而为 */
+      // 身份以平台接口为准；接口失败再兜底猜一次 DOM 选择器（不确定，尽力而为）
+      const id = await fetchDouyinIdentity(wc)
+      let nickname = id.nickname
+      if (!nickname) {
+        try {
+          const name = await wc.executeJavaScript(`
+            (document.querySelector('.user-info .name, .account-name, .nick-name, [class*="nickname"]')
+              ?.textContent || '').trim()`)
+          if (name) nickname = name.slice(0, 60)
+        } catch {
+          /* 尽力而为 */
+        }
       }
       closeTab(tabId)
-      return { ok: true, message: '登录成功', nickname }
+      return { ok: true, message: '登录成功', nickname, platformUid: id.uid, avatar: id.avatar }
     }
   }
   closeTab(tabId)

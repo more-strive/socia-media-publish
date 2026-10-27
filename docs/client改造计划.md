@@ -147,3 +147,12 @@
 - 内容区：控制台标签 = 原侧边栏+页面（v-show 保活）；平台标签 = WebContentsView 覆盖层，区域由 Shell 布局上报（tabs:rect），控制台激活时上报 null 隐藏全部平台标签（后台保活）
 - tabs.ts：TabInfo 增加 loading/canBack/canFwd（did-navigate/did-start-loading 等事件同步）；新增 navigateTab（地址栏）/navTab（back/forward/reload）/quickLinks；activateTab 接受 null=回控制台；新 IPC tabs:navigate、tabs:nav、tabs:quick-links
 - /browser 页改为「账号浏览器」控制台页：平台快捷入口网格 + 已开标签管理（不再承担视图宿主职责）；useRpaEngine 认领/绑定时不再跳转 /browser（Shell 下平台标签全局可见，引擎开标签即自动激活）
+
+### M7 第二批（2026-10-27）：扫码绑定回填平台账号身份（蚁小二 getDouyinUserInfo 实证）
+
+- 痛点：loginDouyin 此前只判 cookie 命中，昵称靠猜 DOM 选择器常落空——账号列表看不出绑的是谁的抖音号
+- douyin.ts：登录成功后在已登录页面同源 `fetch('/web/api/media/user/info')`（兜底 `/aweme/v1/creator/user/info/`），取 `user.uid/nickname/avatar_thumb.url_list[0]`（蚁小二 bundle 反解的 getDouyinUserInfo 取值路径）；「已有登录态」重绑路径也短开标签取数回填；接口失败再退回 DOM 猜测
+- LoginResult（platforms.ts/preload/useRpaEngine）扩展 platformUid/avatar；AccountsView save/bind 统一走 backfillIdentity 回写 platform_account_id/nickname/avatar，列表昵称列展示头像（悬停看 UID）
+- server：AccountUpdateIn 放行 platform_account_id/avatar（模型与建表初始就有这两列，远程库免 ALTER）；update_account 在回填 platform_account_id 时校验同团队同平台唯一，撞车报 409「已绑定在「xxx」」（http 层统一弹提示）
+- 通用适配器（generic.ts）暂只回昵称，其余平台的身份接口留作后续（蚁小二 watcher 注册表 platformMapsIn 有 43 平台实证可查）
+
