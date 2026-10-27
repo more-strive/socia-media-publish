@@ -253,6 +253,8 @@ export const PLATFORM_LABELS: Record<string, string> = {
   weibo: '微博',
   wechat_gzh: '公众号',
   toutiao: '头条',
+  baijiahao: '百家号',
+  zhihu: '知乎',
   tiktok: 'TikTok',
   youtube: 'YouTube',
 }

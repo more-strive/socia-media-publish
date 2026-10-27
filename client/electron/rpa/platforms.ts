@@ -1,12 +1,19 @@
 /** 平台适配器注册表：RPA 平台能力的统一抽象（对标蚁小二按平台拆分的在线脚本层）
- *  新平台接入：实现 PlatformAdapter 并在下方 registry 注册，引擎按 account.platform 分发 */
+ *  新平台接入：优先在 registry.ts 加元数据走 generic 适配器（URL/判定规则有蚁小二实证）；
+ *  流程特殊的平台（如抖音）再实现 PlatformAdapter 并在下方注册，引擎按 account.platform 分发 */
 import type { ProxyConfig } from '../proxy'
 import { loginDouyin, probeDouyinLogin, publishDouyinVideo } from './douyin'
+import { makeAdapter } from './generic'
+import { PLATFORM_METAS } from './registry'
 
 export interface PublishInput {
   itemId: number
   accountId: number
   title: string
+  /** 话题标签：按平台规则拼进标题（蚁小二 description 预处理，见 util.withTopics） */
+  tags?: string[] | null
+  /** 图文摘要：平台编辑器支持正文时的候选（通用流程暂只消费标题） */
+  summary?: string | null
   /** 引擎已下载就位的本地素材路径 */
   mediaPath: string
   /** 账号绑定代理：发布与登录保持同一出口 */
@@ -49,12 +56,16 @@ export interface PlatformAdapter {
 const douyinAdapter: PlatformAdapter = {
   code: 'douyin',
   login: loginDouyin,
-  publish: ({ itemId, accountId, title, mediaPath, proxy }) =>
-    publishDouyinVideo({ accountId, itemId, title, videoPath: mediaPath, proxy }),
+  publish: ({ itemId, accountId, title, tags, mediaPath, proxy }) =>
+    publishDouyinVideo({ accountId, itemId, title, tags, videoPath: mediaPath, proxy }),
   probe: probeDouyinLogin,
 }
 
-const registry: Record<string, PlatformAdapter> = { douyin: douyinAdapter }
+const registry: Record<string, PlatformAdapter> = {
+  douyin: douyinAdapter,
+  // 元数据驱动的通用适配器：快手/小红书/B站/头条/微博/视频号/百家号/知乎（URL 与登录判定为蚁小二实证）
+  ...Object.fromEntries(PLATFORM_METAS.map((m) => [m.code, makeAdapter(m)])),
+}
 
 export function adapterOf(platform: string): PlatformAdapter | undefined {
   return registry[platform]

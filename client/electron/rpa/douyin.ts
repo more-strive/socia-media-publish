@@ -1,28 +1,19 @@
 /** 抖音创作者平台 RPA：每账号独立 session（扫码登录一次，cookie 持久化），自动上传视频发布
- * 第三方页面一律在应用内标签页打开（electron/tabs.ts），不弹独立窗口 */
-import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-
+ *  第三方页面一律在应用内标签页打开（electron/tabs.ts），不弹独立窗口
+ *  通用部分（等待/截图/文本注入/CDP 文件注入）已抽至 util.ts，与 generic 适配器共用 */
 import electron from 'electron'
 
 import { closeTab, openTab, tabWebContents } from '../tabs'
 import type { ProxyConfig } from '../proxy'
+import { cdpSetFiles, clickByTextExpr, fillText, shot, sleep, waitFor, withTopics } from './util'
 
-const { app, session } = electron
+const { session } = electron
 
 const CREATOR_HOME = 'https://creator.douyin.com/creator-micro/home'
 const UPLOAD_URL = 'https://creator.douyin.com/creator-micro/content/upload'
 const LOGIN_TIMEOUT_MS = 15 * 60_000
 
 const partitionOf = (accountId: number): string => `persist:douyin-${accountId}`
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-async function logDir(): Promise<string> {
-  const dir = join(app.getPath('userData'), 'rpa-logs')
-  await mkdir(dir, { recursive: true })
-  return dir
-}
 
 async function hasLoginCookie(accountId: number): Promise<boolean> {
   const ses = session.fromPartition(partitionOf(accountId))
@@ -62,43 +53,12 @@ export async function loginDouyin(
   return { ok: false, message: '等待扫码超时（15 分钟）' }
 }
 
-/** 轮询页面 JS 表达式直到为 true；页面跳转中的异常忽略 */
-async function waitFor(
-  wc: electron.WebContents,
-  expr: string,
-  timeoutMs: number,
-  everyMs = 1500,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      if (await wc.executeJavaScript(`!!(${expr})`)) return true
-    } catch {
-      /* 页面跳转中 */
-    }
-    // eslint-disable-next-line no-await-in-loop
-    await sleep(everyMs)
-  }
-  return false
-}
-
-/** 每个关键步骤截图到 userData/rpa-logs，便于排查选择器失配；路径收集后随结果归档上传 */
-async function shot(wc: electron.WebContents, name: string, into: string[] = []): Promise<void> {
-  try {
-    const img = await wc.capturePage()
-    const path = join(await logDir(), `${name}.png`)
-    await writeFile(path, img.toPNG())
-    into.push(path)
-  } catch {
-    /* 截图失败不影响流程 */
-  }
-}
-
 export interface DouyinPublishIn {
   accountId: number
   itemId: number
   title: string
+  /** 话题标签：抖音规则为 "#话题 " 追加在标题后（超 5 个截断，蚁小二实证） */
+  tags?: string[] | null
   videoPath: string
   /** 账号绑定代理：发布与登录保持同一出口（claim 由 server 下发） */
   proxy?: ProxyConfig
@@ -112,10 +72,10 @@ export interface DouyinPublishOut {
   screenshots: string[]
 }
 
-/** 自动上传发布：标签页打开创作者上传页 → CDP 注入视频文件 → 填标题 → 点发布 → 等跳转
+/** 自动上传发布：标签页打开创作者上传页 → CDP 注入视频文件 → 填标题（含话题）→ 点发布 → 等跳转
  * 成功自动关标签；失败保留标签供人工检查 */
 export async function publishDouyinVideo(input: DouyinPublishIn): Promise<DouyinPublishOut> {
-  const { accountId, itemId, title } = input
+  const { accountId, itemId } = input
   if (!(await hasLoginCookie(accountId))) {
     return { ok: false, message: '抖音登录态缺失，请先扫码绑定', screenshots: [] }
   }
@@ -139,25 +99,10 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
     await shot(wc, `item${itemId}_1_loaded`, shots)
 
     // 渲染层无法给 input[type=file] 赋值，走 CDP DOM.setFileInputFiles
-    const dbg = wc.debugger
-    dbg.attach('1.1')
-    try {
-      const doc = await dbg.sendCommand('DOM.getDocument')
-      const node = await dbg.sendCommand('DOM.querySelector', {
-        nodeId: doc.root.nodeId,
-        selector: 'input[type=file]',
-      })
-      if (!node.nodeId) {
-        result = { ok: false, message: '上传页未找到文件输入框', screenshots: shots }
-        return result
-      }
-      await dbg.sendCommand('DOM.setFileInputFiles', { files: [input.videoPath], nodeId: node.nodeId })
-    } finally {
-      try {
-        dbg.detach()
-      } catch {
-        /* 已断开 */
-      }
+    const set = await cdpSetFiles(wc, 'input[type=file]', [input.videoPath])
+    if (set !== 'ok') {
+      result = { ok: false, message: `文件注入失败（${set}）`, screenshots: shots }
+      return result
     }
 
     // 等上传转码完成：标题编辑器出现（大视频可能较久）
@@ -167,32 +112,21 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
     }
     await shot(wc, `item${itemId}_2_uploaded`, shots)
 
-    // 填标题：抖音标题为 contenteditable，用 execCommand 触发输入事件（React 受控组件兼容）
-    const fill = await wc.executeJavaScript(`
-      (() => {
-        const ed = document.querySelector(
-          '.editor-kit__container [contenteditable=true], [contenteditable=true], .ql-editor')
-        if (!ed) return 'no-editor'
-        ed.focus()
-        document.execCommand('selectAll', false, null)
-        document.execCommand('insertText', false, ${JSON.stringify(title)})
-        return 'ok'
-      })()`)
+    // 填标题（contenteditable，execCommand/insertText 兜底见 util.fillText）；话题按抖音规则追加
+    const fill = await fillText(
+      wc,
+      '.editor-kit__container [contenteditable=true], [contenteditable=true], .ql-editor',
+      withTopics(input.title, input.tags, 'hash-space'),
+    )
     if (fill !== 'ok') {
       result = { ok: false, message: `标题编辑器异常：${fill}`, screenshots: shots }
       return result
     }
 
-    // 找“发布”按钮（精确文案，避免误点“存草稿”/“定时发布”）并点击
+    // 找"发布"按钮并点击（蚁小二 baseStartPush 文案组：精确匹配，避免误点"存草稿"/"定时发布"）
     const clicked = await waitFor(
       wc,
-      `(() => {
-        const b = [...document.querySelectorAll('button')]
-          .find((x) => x.textContent.trim() === '发布' && !x.disabled)
-        if (!b) return false
-        b.click()
-        return true
-      })()`,
+      clickByTextExpr(['发布', '发表', '发布作品', '发 布', '立即投稿']),
       60_000,
     )
     if (!clicked) {
