@@ -67,6 +67,7 @@ async function probe(meta: PlatformMeta, accountId: number, proxy?: ProxyConfig)
     partition: partitionOf(meta.code, accountId),
     title: `检测${meta.name}登录态`,
     proxy,
+    hidden: true, // 探测是纯自动流程，完全隐藏（含批量探测）
   })
   try {
     const wc = tabWebContents(tabId)
@@ -97,6 +98,7 @@ async function publish(meta: PlatformMeta, input: PublishInput): Promise<Publish
     partition: partitionOf(meta.code, accountId),
     title: `发布 #${itemId}`,
     proxy: input.proxy,
+    background: true, // 静默执行：藏在控制台 UI 之下，不抢焦点（失败保留标签供手动检查）
   })
   const wc = tabWebContents(tabId)
   if (!wc) return { ok: false, message: '标签页创建失败' }

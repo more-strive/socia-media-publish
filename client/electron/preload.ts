@@ -7,6 +7,8 @@ interface TabItem {
   loading: boolean
   canBack: boolean
   canFwd: boolean
+  /** 静默执行中的标签（RPA 自动发布），点击可切换查看 */
+  background: boolean
 }
 interface TabsState {
   tabs: TabItem[]
@@ -76,8 +78,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
   tabs: {
-    open: (opts: { url: string; partition?: string; title?: string; proxy?: ElectronProxy }): Promise<number> =>
-      ipcRenderer.invoke('tabs:open', opts),
+    open: (opts: {
+      url: string
+      partition?: string
+      title?: string
+      proxy?: ElectronProxy
+      background?: boolean
+      hidden?: boolean
+    }): Promise<number> => ipcRenderer.invoke('tabs:open', opts),
     activate: (id: number | null): Promise<void> => ipcRenderer.invoke('tabs:activate', id),
     close: (id: number): Promise<void> => ipcRenderer.invoke('tabs:close', id),
     /** 地址栏导航（裸域名自动补 https） */

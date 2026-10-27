@@ -3,12 +3,15 @@ import hashlib
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from app.api.deps import CurrentUser, DbDep, PageDep, require_roles
 from app.core.exceptions import BizError, NotFoundError
 from app.models.account import AccountGroup, SocialAccount
+from app.models.content import PublishItem
 from app.models.enums import AuthStatus, UserRole
+from app.models.interaction import Message
+from app.models.stats import AccountDailyStat, ContentDailyStat
 from app.schemas.account import (
     AccountGroupIn,
     AccountGroupOut,
@@ -169,9 +172,31 @@ async def delete_account(account_id: int, user: CurrentUser, db: DbDep):
     )
     if account is None:
         raise NotFoundError("账号不存在")
+    # 账号被发布条目/统计/私信外键引用，直接删会被 1451 拦截：先清关联数据
+    removed = 0
+    item_ids = (
+        (await db.execute(select(PublishItem.id).where(PublishItem.account_id == account_id))).scalars().all()
+    )
+    if item_ids:
+        removed += (
+            await db.execute(delete(ContentDailyStat).where(ContentDailyStat.publish_item_id.in_(item_ids)))
+        ).rowcount or 0
+        removed += (await db.execute(delete(PublishItem).where(PublishItem.id.in_(item_ids)))).rowcount or 0
+    removed += (
+        await db.execute(delete(ContentDailyStat).where(ContentDailyStat.account_id == account_id))
+    ).rowcount or 0
+    removed += (
+        await db.execute(delete(AccountDailyStat).where(AccountDailyStat.account_id == account_id))
+    ).rowcount or 0
+    msg_ids = (await db.execute(select(Message.id).where(Message.account_id == account_id))).scalars().all()
+    if msg_ids:
+        # 多级评论/回复是自引用外键：先把其他消息指向它们的引用置空，再删除
+        await db.execute(update(Message).where(Message.parent_id.in_(msg_ids)).values(parent_id=None))
+        await db.execute(update(Message).where(Message.reply_to_id.in_(msg_ids)).values(reply_to_id=None))
+        removed += (await db.execute(delete(Message).where(Message.id.in_(msg_ids)))).rowcount or 0
     await db.delete(account)
     await db.commit()
-    return ok(message="已删除")
+    return ok(message=f"已删除账号及 {removed} 条关联数据")
 
 
 @router.post("/batch-check", summary="批量检测账号有效性（失效一键识别）", response_model=None)

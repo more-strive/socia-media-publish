@@ -461,7 +461,11 @@ async function bind(row: SocialAccount): Promise<void> {
 }
 
 async function remove(row: SocialAccount): Promise<void> {
-  await ElMessageBox.confirm(`确定删除账号「${row.nickname}」？`, '提示', { type: 'warning' })
+  await ElMessageBox.confirm(
+    `确定删除账号「${row.nickname}」？其发布记录、统计数据与私信将一并删除`,
+    '提示',
+    { type: 'warning' },
+  )
   await accountApi.remove(row.id)
   ElMessage.success('已删除')
   await load()

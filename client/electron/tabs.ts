@@ -15,6 +15,8 @@ export interface TabInfo {
   loading: boolean
   canBack: boolean
   canFwd: boolean
+  /** 静默执行中的标签（RPA 自动发布），点击可切换查看 */
+  background: boolean
 }
 
 export interface TabsState {
@@ -24,6 +26,10 @@ export interface TabsState {
 
 interface Tab extends TabInfo {
   view: InstanceType<typeof WebContentsView>
+  /** 静默标签：挂在主渲染层之下被控制台 UI 覆盖（页面正常渲染/截图），不激活不抢焦点 */
+  background: boolean
+  /** 隐藏标签：在 background 基础上连标签条也不出现（探测等短命自动流程） */
+  hidden: boolean
 }
 
 let seq = 0
@@ -44,14 +50,17 @@ function navFlags(tab: Tab): void {
 
 function state(): TabsState {
   return {
-    tabs: [...tabs.values()].map(({ id, title, url, loading, canBack, canFwd }) => ({
-      id,
-      title,
-      url,
-      loading,
-      canBack,
-      canFwd,
-    })),
+    tabs: [...tabs.values()]
+      .filter((t) => !t.hidden)
+      .map(({ id, title, url, loading, canBack, canFwd, background }) => ({
+        id,
+        title,
+        url,
+        loading,
+        canBack,
+        canFwd,
+        background,
+      })),
     activeId,
   }
 }
@@ -60,19 +69,49 @@ function emit(): void {
   mainWindow?.webContents.send('tabs:changed', state())
 }
 
-/** 只把激活的 view 附到窗口上（其余作为后台标签保活） */
+/** 层级装配（自底向上）：静默标签 → 主渲染层（控制台 UI，盖住静默标签）→ 激活的平台标签
+ *  静默标签保持全尺寸挂载（覆盖态）——页面照常渲染，capturePage 截图与页面行为不受影响 */
 function syncAttached(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
-  for (const t of tabs.values()) mainWindow.contentView.removeChildView(t.view)
+  const cv = mainWindow.contentView
+  for (const t of tabs.values()) cv.removeChildView(t.view)
+  const [cw, ch] = mainWindow.getContentSize()
+  // 主渲染层 = contentView 中承载窗口 webContents 的那个 view；静默标签要垫在它之下
+  let mainView: electron.WebContentsView | undefined
+  for (const v of cv.children) {
+    const wv = v as electron.WebContentsView
+    if (wv.webContents && wv.webContents === mainWindow.webContents) {
+      mainView = wv
+      break
+    }
+  }
+  const bgTabs = [...tabs.values()].filter((t) => t.background && t.id !== activeId)
+  if (mainView) {
+    for (const t of bgTabs) {
+      cv.addChildView(t.view)
+      t.view.setBounds({ x: 0, y: 0, width: cw || 1280, height: ch || 800 })
+    }
+    // 主渲染层移除后重挂即置顶，控制台 UI 覆盖住静默标签
+    cv.removeChildView(mainView)
+    cv.addChildView(mainView)
+  } else {
+    // 兜底：识别不到主渲染层时把静默标签挂到可视区外，避免盖住控制台
+    for (const t of bgTabs) {
+      cv.addChildView(t.view)
+      t.view.setBounds({ x: -2000, y: 0, width: cw || 1280, height: ch || 800 })
+    }
+  }
   const active = activeId != null ? tabs.get(activeId) : undefined
   if (active) {
-    mainWindow.contentView.addChildView(active.view)
+    cv.addChildView(active.view)
     active.view.setBounds(bounds)
   }
 }
 
 export function initTabs(win: electron.BrowserWindow): void {
   mainWindow = win
+  // 窗口尺寸变化时静默标签同步重设 bounds（渲染层只在平台页上报 rect，控制台下不会触发）
+  win.on('resize', () => syncAttached())
   syncAttached()
   emit()
 }
@@ -90,9 +129,24 @@ export function resetTabs(): void {
   activeId = null
 }
 
-export function openTab(opts: { url: string; partition?: string; title?: string; proxy?: ProxyConfig }): number {
+export function openTab(opts: {
+  url: string
+  partition?: string
+  title?: string
+  proxy?: ProxyConfig
+  /** 静默标签：不激活不抢焦点，藏在控制台 UI 之下执行（RPA 自动发布用） */
+  background?: boolean
+  /** 隐藏标签：连标签条也不出现（探测等短命自动流程），隐含 background */
+  hidden?: boolean
+}): number {
   const view = new WebContentsView({
-    webPreferences: { partition: opts.partition, contextIsolation: true, nodeIntegration: false },
+    // backgroundThrottling 关闭：被覆盖的静默标签不被降频，页面定时器/上传进度正常走
+    webPreferences: {
+      partition: opts.partition,
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
   })
   const id = ++seq
   const tab: Tab = {
@@ -103,6 +157,8 @@ export function openTab(opts: { url: string; partition?: string; title?: string;
     canBack: false,
     canFwd: false,
     view,
+    background: !!opts.background || !!opts.hidden,
+    hidden: !!opts.hidden,
   }
   tabs.set(id, tab)
   const wc = view.webContents
@@ -140,15 +196,19 @@ export function openTab(opts: { url: string; partition?: string; title?: string;
   } else {
     load()
   }
-  activeId = id
+  // 静默标签不改变当前激活态（用户停留在原页面，自动化在底层执行）
+  if (!tab.background) activeId = id
   syncAttached()
   emit()
   return id
 }
 
-/** 激活标签；null = 回到控制台标签 */
+/** 激活标签；null = 回到控制台标签（隐藏标签不可激活——不在标签条，无 UI 入口） */
 export function activateTab(id: number | null): void {
-  if (id !== null && !tabs.has(id)) return
+  if (id !== null) {
+    const t = tabs.get(id)
+    if (!t || t.hidden) return
+  }
   activeId = id
   syncAttached()
   emit()

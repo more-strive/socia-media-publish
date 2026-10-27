@@ -156,3 +156,13 @@
 - server：AccountUpdateIn 放行 platform_account_id/avatar（模型与建表初始就有这两列，远程库免 ALTER）；update_account 在回填 platform_account_id 时校验同团队同平台唯一，撞车报 409「已绑定在「xxx」」（http 层统一弹提示）
 - 通用适配器（generic.ts）暂只回昵称，其余平台的身份接口留作后续（蚁小二 watcher 注册表 platformMapsIn 有 43 平台实证可查）
 
+### 静默发布 + 抖音假发布修复（2026-10-27）
+
+- 静默发布：tabs.openTab 支持 background——静默标签垫在主渲染层之下（contentView.children 按 webContents 引用识别主渲染层并重挂置顶，识别不到则挂可视区外兜底），全尺寸挂载保证 capturePage 截图与页面行为正常，backgroundThrottling:false 防降频；标签条机器人角标可点开查看
+- 静默范围（除扫码登录需人工操作外全部静默）：抖音发布/登录探测/账号身份识别（重绑回填页）、通用适配器发布/探测；用户主动的快捷入口（各平台创作者中心）仍正常打开
+- 两档静默：background=垫底执行+标签条机器人角标（发布用，失败可点开排查）；hidden=连标签条都不出现（探测/身份识别等短命自动流程），TabsState 过滤、不可激活，隐含 background
+- 实证一次"假发布"：标题编辑器一出现就点发布，视频仍停在"文件解析中 0%"时页面跳内容管理页（enter_from=publish），回报成功但抖音侧无作品——归档截图实锤定位
+- 修复：douyin.ts 增加 videoReady 门槛——点发布前等页面出现"重新上传/上传成功"（300s/2s 轮询），等不到如实失败并留 upload_stuck 截图；点击后等待跳转 60s→120s；"上传就绪后才允许点击"补强后，"离开上传页"的成功判定恢复可信
+- 根因之二：应用最小化/遮挡时 Chromium 给窗口渲染进程降频，上传 JS 停摆（0% 卡死）——backgroundThrottling:false 覆盖此场景
+- 遗留：M7 通用适配器仍是"编辑器出现即点发布"，各平台真实账号验证时需按平台补上传完成等待；成功后条目可在内容管理页做二次核验（列表出现该标题）再回报，属 M4 风控批次
+

@@ -82,11 +82,65 @@
         <el-form-item v-if="form.type === 'article'" label="正文">
           <el-input v-model="form.body" type="textarea" :rows="10" placeholder="支持 HTML / Markdown 文本" />
         </el-form-item>
-        <el-form-item v-else label="素材链接">
-          <el-input v-model="mediaText" type="textarea" :rows="4" placeholder="每行一个 URL（视频/图片）" />
+        <el-form-item v-else label="素材">
+          <div class="w-full">
+            <div class="flex items-center gap-2">
+              <el-upload :show-file-list="false" multiple :accept="acceptOf" :http-request="doUploadMedia">
+                <el-button :loading="uploading.length > 0">
+                  上传{{ form.type === 'video' ? '视频' : '图片' }}<span class="text-muted text-12px ml-1">（存本地服务）</span>
+                </el-button>
+              </el-upload>
+              <el-input v-model="manualUrl" placeholder="或粘贴外部素材链接，回车添加" class="flex-1" @keyup.enter="addManualUrl">
+                <template #append>
+                  <el-button @click="addManualUrl">添加</el-button>
+                </template>
+              </el-input>
+            </div>
+            <div v-for="u in uploading" :key="u.name" class="mt-2 text-12px text-muted">
+              {{ u.name }} 上传中 {{ u.percent }}%
+            </div>
+            <div v-if="mediaList.length" class="flex flex-wrap gap-3 mt-3">
+              <div v-for="(u, i) in mediaList" :key="u" class="relative">
+                <el-image
+                  v-if="isImage(u)"
+                  :src="fileUrl(u)"
+                  :preview-src-list="imageUrls"
+                  fit="cover"
+                  preview-teleported
+                  class="w-16 h-16 rounded border"
+                />
+                <div v-else class="w-16 h-16 rounded border bg-gray-100 flex flex-col items-center justify-center text-11px text-center px-1">
+                  <span>视频</span>
+                  <span class="truncate w-full">{{ nameOf(u) }}</span>
+                </div>
+                <el-button
+                  size="small"
+                  circle
+                  class="absolute -top-2 -right-2 z-10"
+                  @click="mediaList.splice(i, 1)"
+                >
+                  ×
+                </el-button>
+              </div>
+            </div>
+            <div v-else class="text-muted text-12px mt-2">暂无素材；视频发布时取列表第一个视频</div>
+          </div>
         </el-form-item>
-        <el-form-item label="封面链接">
-          <el-input v-model="form.cover" />
+        <el-form-item label="封面">
+          <div class="flex items-center gap-2 w-full">
+            <el-input v-model="form.cover" placeholder="封面图 URL，或点右侧上传" />
+            <el-upload :show-file-list="false" accept="image/*" :http-request="doUploadCover">
+              <el-button :loading="coverUploading">上传封面</el-button>
+            </el-upload>
+            <el-image
+              v-if="form.cover"
+              :src="fileUrl(String(form.cover))"
+              :preview-src-list="[fileUrl(String(form.cover))]"
+              fit="cover"
+              preview-teleported
+              class="w-10 h-10 rounded border shrink-0"
+            />
+          </div>
         </el-form-item>
         <el-form-item label="标签">
           <el-select v-model="form.tags" multiple filterable allow-create class="w-full" placeholder="输入后回车创建" />
@@ -126,7 +180,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { contentApi } from '@/api/modules'
@@ -147,7 +201,59 @@ const query = reactive<Record<string, unknown>>({ page: 1, page_size: 20, type_:
 
 const formVisible = ref(false)
 const form = reactive<Record<string, unknown>>({ type: 'video', tags: [] })
-const mediaText = ref('')
+/** 素材列表（本地上传的相对路径 / 外部绝对 URL 混存，保存时整体提交 media） */
+const mediaList = ref<string[]>([])
+const manualUrl = ref('')
+const uploading = ref<{ name: string; percent: number }[]>([])
+const coverUploading = ref(false)
+
+const imageExts = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp']
+const acceptOf = computed(() => (form.type === 'video' ? 'video/*' : 'image/*'))
+
+/** 本地上传素材是 /api 前缀相对路径，展示/预览时拼当前 origin（开发态走 vite 代理） */
+function fileUrl(u: string): string {
+  return /^https?:/.test(u) ? u : `${location.origin}${u}`
+}
+function isImage(u: string): boolean {
+  const ext = u.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+  return imageExts.includes(ext)
+}
+function nameOf(u: string): string {
+  return decodeURIComponent(u.split('?')[0].split('/').pop() ?? u)
+}
+const imageUrls = computed(() => mediaList.value.filter(isImage).map(fileUrl))
+
+async function doUploadMedia(option: { file: File }): Promise<void> {
+  const entry = { name: option.file.name, percent: 0 }
+  uploading.value = [...uploading.value, entry]
+  try {
+    const data = await contentApi.upload(option.file, (p) => {
+      entry.percent = p
+    })
+    mediaList.value = [...mediaList.value, data.url]
+    ElMessage.success(`已上传 ${option.file.name}`)
+  } finally {
+    uploading.value = uploading.value.filter((x) => x !== entry)
+  }
+}
+
+async function doUploadCover(option: { file: File }): Promise<void> {
+  coverUploading.value = true
+  try {
+    const data = await contentApi.upload(option.file)
+    form.cover = data.url
+  } finally {
+    coverUploading.value = false
+  }
+}
+
+function addManualUrl(): void {
+  const u = manualUrl.value.trim()
+  if (!u) return
+  if (!/^(https?:\/\/|\/api\/)/.test(u)) return void ElMessage.warning('请粘贴 http(s) 链接')
+  mediaList.value = [...mediaList.value, u]
+  manualUrl.value = ''
+}
 
 const aiVisible = ref(false)
 const aiLoading = ref(false)
@@ -168,7 +274,8 @@ async function load(): Promise<void> {
 
 function openCreate(): void {
   Object.assign(form, { id: null, type: 'video', title: '', summary: '', body: '', cover: '', tags: [] })
-  mediaText.value = ''
+  mediaList.value = []
+  manualUrl.value = ''
   formVisible.value = true
 }
 
@@ -178,14 +285,16 @@ function openEdit(row: Content): void {
     return
   }
   Object.assign(form, { ...row })
-  mediaText.value = (row.media || []).join('\n')
+  mediaList.value = [...(row.media || [])]
+  manualUrl.value = ''
   formVisible.value = true
 }
 
 async function save(): Promise<void> {
   form.title = (form.title as string)?.trim()
   if (!form.title) return void ElMessage.warning('请填写标题')
-  form.media = mediaText.value.split('\n').map((s) => s.trim()).filter(Boolean)
+  if (form.type !== 'article' && !mediaList.value.length) return void ElMessage.warning('请上传或添加至少一个素材')
+  form.media = [...mediaList.value]
   saving.value = true
   try {
     if (form.id) await contentApi.update(form.id as number, form)

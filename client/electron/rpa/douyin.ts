@@ -60,9 +60,15 @@ async function fetchDouyinIdentity(wc: electron.WebContents): Promise<DouyinIden
   }
 }
 
-/** 已有登录态时也要回填身份（重绑场景）：短开一个创作者首页标签取数即关 */
+/** 已有登录态时也要回填身份（重绑场景）：短开一个创作者首页标签取数即关（静默） */
 async function identityOfExistingLogin(accountId: number, proxy?: ProxyConfig): Promise<DouyinIdentity> {
-  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '抖音账号识别', proxy })
+  const tabId = openTab({
+    url: CREATOR_HOME,
+    partition: partitionOf(accountId),
+    title: '抖音账号识别',
+    proxy,
+    hidden: true, // 短命自动流程：完全不出现在标签条
+  })
   try {
     const wc0 = tabWebContents(tabId)
     if (wc0) await waitFor(wc0, `document.readyState === 'complete'`, 20_000, 1000)
@@ -143,6 +149,7 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
     partition: partitionOf(accountId),
     title: `发布 #${itemId}`,
     proxy: input.proxy,
+    background: true, // 静默执行：藏在控制台 UI 之下，不抢焦点（失败保留标签供手动检查）
   })
   const wc = tabWebContents(tabId)
   if (!wc) return { ok: false, message: '标签页创建失败', screenshots: [] }
@@ -181,6 +188,25 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
       return result
     }
 
+    // 等视频真正上传完成再点发布：编辑器出现 ≠ 就绪——过早点击会"假成功"（URL 离开但抖音侧未发布，
+    // 实证：视频停在"文件解析中 0%"时点击，页面跳内容管理页但作品不存在）
+    const videoReady = await waitFor(
+      wc,
+      `(() => { const t = document.body.innerText; return t.includes('重新上传') || t.includes('上传成功') })()`,
+      300_000,
+      2000,
+    )
+    if (!videoReady) {
+      await shot(wc, `item${itemId}_x_upload_stuck`, shots)
+      result = {
+        ok: false,
+        message: '视频上传/解析未完成（长时间未就绪，见截图；可能是页面被降频或网络受限）',
+        screenshots: shots,
+      }
+      return result
+    }
+    await shot(wc, `item${itemId}_2b_video_ready`, shots)
+
     // 找"发布"按钮并点击（蚁小二 baseStartPush 文案组：精确匹配，避免误点"存草稿"/"定时发布"）
     const clicked = await waitFor(
       wc,
@@ -193,11 +219,12 @@ export async function publishDouyinVideo(input: DouyinPublishIn): Promise<Douyin
     }
     await shot(wc, `item${itemId}_3_clicked`, shots)
 
-    // 成功判定：离开上传页
-    const done = await waitFor(wc, `!location.pathname.includes('/content/upload')`, 60_000)
+    // 成功判定：离开上传页且带 enter_from=publish（仅 pathname 变化不充分，实证存在假跳转）
+    const done = await waitFor(wc, `!location.pathname.includes('/content/upload')`, 120_000)
     await shot(wc, `item${itemId}_4_${done ? 'done' : 'timeout'}`, shots)
+    const finalUrl = wc.getURL()
     result = done
-      ? { ok: true, message: '发布成功', publishUrl: wc.getURL(), screenshots: shots }
+      ? { ok: true, message: '发布成功', publishUrl: finalUrl, screenshots: shots }
       : { ok: false, message: '点击发布后未跳转，请结合截图/标签页排查（可能有风控弹窗）', screenshots: shots }
     return result
   } finally {
@@ -213,7 +240,13 @@ export async function probeDouyinLogin(
   if (!(await hasLoginCookie(accountId))) {
     return { ok: true, valid: false, message: '无登录 cookie（未绑定或登录态已清理）' }
   }
-  const tabId = openTab({ url: CREATOR_HOME, partition: partitionOf(accountId), title: '检测登录态', proxy })
+  const tabId = openTab({
+    url: CREATOR_HOME,
+    partition: partitionOf(accountId),
+    title: '检测登录态',
+    proxy,
+    hidden: true, // 探测是纯自动流程，完全隐藏（含批量探测）
+  })
   try {
     await waitFor(tabWebContents(tabId) as electron.WebContents, `document.readyState === 'complete'`, 20_000, 1000)
     const wc = tabWebContents(tabId)

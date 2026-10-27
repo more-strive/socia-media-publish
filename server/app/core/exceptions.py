@@ -40,8 +40,11 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(IntegrityError)
-    async def integrity_error_handler(_: Request, __: IntegrityError):
-        return JSONResponse(status_code=200, content={"code": 409, "message": "数据冲突，请检查唯一性字段", "data": None})
+    async def integrity_error_handler(_: Request, exc: IntegrityError):
+        # 区分外键（1451 删除/更新被引用行）与唯一键（1062）冲突，避免误导排查方向
+        mysql_code = getattr(getattr(exc, "orig", None), "args", [None])[0]
+        msg = "数据被其他记录引用，无法删除或修改" if mysql_code == 1451 else "数据冲突，请检查唯一性字段"
+        return JSONResponse(status_code=200, content={"code": 409, "message": msg, "data": None})
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(_: Request, exc: Exception):

@@ -50,6 +50,8 @@ electronAPI?: {
       partition?: string
       title?: string
       proxy?: { scheme: string; host: string; port: number; username?: string | null; password?: string | null }
+      background?: boolean
+      hidden?: boolean
     }) => Promise<number>
     activate: (id: number | null) => Promise<void>
     close: (id: number) => Promise<void>
@@ -58,12 +60,28 @@ electronAPI?: {
     quickLinks: () => Promise<{ code: string; name: string; url: string }[]>
     rect: (rect: { x: number; y: number; width: number; height: number } | null) => Promise<void>
     state: () => Promise<{
-      tabs: { id: number; title: string; url: string; loading: boolean; canBack: boolean; canFwd: boolean }[]
+      tabs: {
+        id: number
+        title: string
+        url: string
+        loading: boolean
+        canBack: boolean
+        canFwd: boolean
+        background: boolean
+      }[]
       activeId: number | null
     }>
     onChanged: (
       cb: (s: {
-        tabs: { id: number; title: string; url: string; loading: boolean; canBack: boolean; canFwd: boolean }[]
+        tabs: {
+          id: number
+          title: string
+          url: string
+          loading: boolean
+          canBack: boolean
+          canFwd: boolean
+          background: boolean
+        }[]
         activeId: number | null
       }) => void,
     ) => () => void

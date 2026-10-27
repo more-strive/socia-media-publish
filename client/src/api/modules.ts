@@ -1,5 +1,5 @@
 /** 全部后端接口封装（与 server/app/api/v1 一一对应） */
-import { del, download, get, post, put } from './http'
+import http, { del, download, get, post, put } from './http'
 import type {
   AccountGroup,
   AccountStat,
@@ -89,6 +89,19 @@ export const contentApi = {
     const form = new FormData()
     files.forEach((f) => form.append('files', f))
     return post<{ imported: number; titles: string[] }>('/contents/import-docx', form)
+  },
+  /** 上传素材（本地存储）：大视频走独立长超时，进度回调供 UI 展示 */
+  upload: (file: File, onProgress?: (percent: number) => void) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http
+      .post<never, { data: { url: string; size: number } }>('/contents/upload', form, {
+        timeout: 600_000,
+        onUploadProgress: (e) => {
+          if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
+        },
+      })
+      .then((body) => body.data)
   },
 }
 

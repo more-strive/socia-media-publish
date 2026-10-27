@@ -7,3 +7,6 @@ venv/
 .idea/
 .vscode/
 .smoke.db
+
+# 运行时上传文件（素材/RPA 截图，经 /api/v1/files 暴露）
+uploads/

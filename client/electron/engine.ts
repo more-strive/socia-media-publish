@@ -162,10 +162,20 @@ async function archiveShots(item: EngineClaim, paths: string[]): Promise<string[
 
 /** 素材准备：http(s) 流式下载到临时文件（不整包进内存）；本地路径直接使用 */
 export async function prepareMedia(mediaUrl: string): Promise<string> {
-  if (!/^https?:\/\//.test(mediaUrl)) return mediaUrl
-  const res = await fetch(mediaUrl)
+  // 以 / 开头的是 server 本地上传素材的根相对路径（/api/v1/files/...），须只拼 baseUrl 的 origin：
+  // baseUrl 自带 /api/v1 前缀，字符串直拼会叠成 /api/v1/api/v1/... 导致 404
+  let url = mediaUrl
+  if (mediaUrl.startsWith('/') && creds) {
+    try {
+      url = new URL(mediaUrl, creds.baseUrl).toString()
+    } catch {
+      /* baseUrl 异常则保持原样 */
+    }
+  }
+  if (!/^https?:\/\//.test(url)) return url
+  const res = await fetch(url)
   if (!res.ok) throw new Error(`素材下载失败 HTTP ${res.status}`)
-  const name = mediaUrl.split('/').pop()?.split('?')[0] || 'video.mp4'
+  const name = url.split('/').pop()?.split('?')[0] || 'video.mp4'
   const dir = await mkdtemp(join(tmpdir(), 'smp-rpa-'))
   const path = join(dir, name)
   await pipeline(Readable.fromWeb(res.body as unknown as NodeWebReadableStream), createWriteStream(path))

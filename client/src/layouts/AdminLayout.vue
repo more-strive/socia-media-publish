@@ -17,6 +17,12 @@
           @click="activate(t.id)"
         >
           <span v-if="t.loading" class="i-carbon:circle-dash w-3 h-3 flex-shrink-0 text-blue-5 animate-spin" />
+          <!-- 静默执行中的 RPA 发布标签：机器人角标，点击可查看自动化过程 -->
+          <span
+            v-else-if="t.background"
+            class="i-carbon:robot w-3 h-3 flex-shrink-0 text-green-5"
+            title="RPA 静默执行中，点击查看"
+          />
           <span class="truncate max-w-140px">{{ t.title }}</span>
           <el-icon class="tab-close" :size="12" @click.stop="close(t.id)"><Close /></el-icon>
         </div>
@@ -141,6 +147,8 @@ interface TabItem {
   loading: boolean
   canBack: boolean
   canFwd: boolean
+  /** 静默执行中的 RPA 发布标签（藏在控制台 UI 之下渲染） */
+  background: boolean
 }
 
 const route = useRoute()
