@@ -129,3 +129,21 @@
   `ALTER TABLE publish_items ADD COLUMN screenshots JSON NULL COMMENT 'RPA 执行步骤截图 URL';`
   `ALTER TABLE social_accounts ADD COLUMN last_probe_screenshot VARCHAR(512) NULL COMMENT '最近登录探测截图 URL';`
 - 局限：静态文件目录无清理策略（截图随时间累积，后续可加定期清理）；上传接口只校验 PNG 魔数与大小
+
+### M7 第一批（2026-10-27）：多平台数据驱动接入（REA 逆向实证）
+
+- 逆向取证：用 REA（github.com/morluto/rea）分析本机蚁小二 4.14.22（`D:\Program Files\yixiaoer`，Electron 应用），解包 app.asar 后提取其主进程/渲染层 bundle 的平台注册表（AuthorizeConfig / TargetPlatformUrl / baseStartPush / description 话题预处理规则），实证数据归档见 docs/蚁小二功能分析.md 附录
+- `electron/rpa/registry.ts`：平台元数据表（code/authorizeUrl/entryUrl/publishVideoUrl/loginCookie 判定/loginRedirectKeywords/标题与文件选择器/发布按钮文案组/成功文案/话题风格），首批 8 平台：快手、小红书、B 站、头条、微博、视频号、百家号、知乎（URL 与登录 cookie 判定为蚁小二实证值；选择器为启发式候选，靠步骤截图归档迭代）
+- `electron/rpa/generic.ts`：元数据驱动通用适配器（login = 开授权页轮询分区 cookie；probe = 开入口页判登录页重定向；publish = CDP setFileInputFiles 注入视频 → fillText 填标题 → clickByTextExpr 文案组点发布 → URL 离开/成功文案判定），批量注册进 platforms.ts 注册表（视图层 M2 能力查询自动生效，无需改视图）
+- `electron/rpa/util.ts`：从抖音适配器抽出共享工具（waitFor/shot/withTopics/fillText/clickByTextExpr/cdpSetFiles）；注入策略对齐蚁小二——input/textarea 走原型 value setter + input/change 事件（React 受控兼容），contenteditable 走 selectAll+execCommand insertText，失败兜底主进程 webContents.insertText；CDP getDocument 用 depth:-1+pierce 覆盖 shadow DOM
+- douyin.ts 重构复用 util：发布按钮从单一精确 '发布' 升级为蚁小二 baseStartPush 文案组（发布/发表/发布作品/发 布/立即投稿，叶子节点精确匹配 + 禁用跳过）；标题支持话题追加（`#话题 ` 风格，超 5 个截断，蚁小二实证规则）
+- engine claim 的 content.tags/summary 透传进适配器（PublishInput 扩展）；PLATFORM_LABELS 补百家号/知乎（server platform 为自由字符串，无需迁移）
+- 登录成功判定 v1 用分区 cookie 命中（与抖音一致）；蚁小二更稳的 CDP Fetch 响应体嗅探（每平台 XHR pattern + 响应字段判定，见附录）留作 M7 第二批
+- 局限：通用流程仅消费标题（含话题），正文/封面/原创声明/位置等蚁小二全量字段未接入；各平台选择器需真实账号逐步验证（失败自动截图归档定位）
+
+### 浏览器 Shell 布局（2026-10-27，M6 延伸：对齐蚁小二桌面端形态）
+
+- AdminLayout 改造为浏览器 Shell（蚁小二实证形态）：顶部标签条（控制台为常驻首标签 + 平台标签 + 「+」新标签快捷入口[各平台创作者中心，取自 RPA 注册表 entryUrl]）+ 导航工具条（后退/前进/刷新/地址栏[裸域名补 https]/未读消息/用户区）；原顶栏并入工具条
+- 内容区：控制台标签 = 原侧边栏+页面（v-show 保活）；平台标签 = WebContentsView 覆盖层，区域由 Shell 布局上报（tabs:rect），控制台激活时上报 null 隐藏全部平台标签（后台保活）
+- tabs.ts：TabInfo 增加 loading/canBack/canFwd（did-navigate/did-start-loading 等事件同步）；新增 navigateTab（地址栏）/navTab（back/forward/reload）/quickLinks；activateTab 接受 null=回控制台；新 IPC tabs:navigate、tabs:nav、tabs:quick-links
+- /browser 页改为「账号浏览器」控制台页：平台快捷入口网格 + 已开标签管理（不再承担视图宿主职责）；useRpaEngine 认领/绑定时不再跳转 /browser（Shell 下平台标签全局可见，引擎开标签即自动激活）

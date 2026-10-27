@@ -53,7 +53,7 @@ class Pagination:
     def __init__(
         self,
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+        page_size: int = Query(20, ge=1, le=500, description="每页条数"),
     ):
         self.page = page
         self.page_size = page_size

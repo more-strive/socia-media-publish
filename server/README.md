@@ -35,6 +35,10 @@ pip install -r requirements.txt
 
 copy .env.example .env   # macOS/Linux: cp .env.example .env，按需修改连接信息
 
+# 当前开发环境约定（2026-10-27 起）：MySQL 借用 yft-server-pro 的远程实例
+# （115.159.50.146，本项目独立 social_publish 库，不与 yft-design 混表）；Redis 用本地 127.0.0.1:6379。
+# 远程库已建表并写入演示数据；create_all 不会给已有表补新列，模型加列后需手工 ALTER（参考 docs/client改造计划.md M4 第四批）。
+
 python -m scripts.init_db      # 建表 + 演示数据
 uvicorn app.main:app --reload  # 启动，文档见 /docs
 ```

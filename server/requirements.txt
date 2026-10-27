@@ -11,3 +11,4 @@ bcrypt>=4.2.0
 httpx>=0.27.0
 python-multipart>=0.0.17
 aiosqlite>=0.20.0  # 仅冒烟测试 scripts/smoke_test.py 需要
+cryptography>=43.0  # MySQL8 caching_sha2_password 认证必需（aiomysql/pymysql 依赖）
